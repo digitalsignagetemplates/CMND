@@ -1,6 +1,8 @@
 # D-Line beheer (prototype)
 
-Lokale aanvulling op CMND & Control voor PPDS D-Line- en Q-Line-schermen (Android ≥ `minAndroid`).
+Lokale aanvulling op CMND & Control voor alle Philips/PPDS-signageschermen met SICP over LAN (D-, Q-, T-Line enz.). Welke functies werken, hangt af van model en SICP-versie: wat een scherm niet ondersteunt, toont de tool als "–", en acties daarop eindigen als "mislukt (NAV)".
+
+T-Line (getest op 32BDL3751T, SICP 2.13): power, bron, power save, opstartbron, gedrag na stroomuitval en firmware zijn uit te lezen; schema en SmartPower ondersteunt dat model niet.
 
 Q-Line (getest op 65BDL3550Q, SICP 2.09) leest power, bron, power save, opstartbron en schema uit. SmartPower, het gedrag na stroomuitval en de firmwareversie via SICP worden op dat model niet ondersteund. De tool toont dan de firmware uit Control. Functies:
 - power-status per scherm, met uitleg wat elke status doet

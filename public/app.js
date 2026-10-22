@@ -43,7 +43,7 @@ function renderKpis() {
   const n = (p) => dl.filter((d) => d.power === p).length;
   const failed = actions.flatMap((a) => a.targets).filter((t) => t.status === 'mislukt' || t.status === 'geen_reactie').length;
   const tiles = [
-    ['D/Q-Line-schermen', dl.length, 'var(--accent)'],
+    ['Philips-schermen', dl.length, 'var(--accent)'],
     ['Aan', n('aan'), 'var(--ok)'],
     ['Backlight uit', n('backlight_uit'), 'var(--info)'],
     ['Slaapt / onbekend', n('slaapt') + n('uit') + n('onbekend'), 'var(--wait)'],

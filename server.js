@@ -31,7 +31,7 @@ function compareVersion(a, b) {
 }
 
 function supportInfo(dev) {
-  if (!new RegExp(cfg.modelPattern, 'i').test(dev.model || '')) return { supported: false, reason: 'Geen D- of Q-Line-model' };
+  if (!new RegExp(cfg.modelPattern, 'i').test(dev.model || '')) return { supported: false, reason: 'Geen Philips-signagemodel (xxBDLnnnnX)' };
   // Control slaat de Android-versie niet op; onbekend telt als toegestaan (alle D-Line vanaf 4550D draaien Android 8+).
   if (!dev.android) return { supported: true, reason: 'Android-versie niet bekend in Control' };
   if (compareVersion(dev.android, cfg.minAndroid) < 0) {
