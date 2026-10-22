@@ -362,8 +362,23 @@ const server = http.createServer(async (req, res) => {
 if (cfg.mode === 'demo') setInterval(() => demo.poll(devices), cfg.pollSeconds * 1000);
 if (cfg.mode === 'control') setInterval(syncControl, cfg.pollSeconds * 1000);
 
+// Poort: --port 8091 bij het starten, anders omgevingsvariabele PORT, anders config.json.
+const argPort = (process.argv.find((a, i) => process.argv[i - 1] === '--port') || '');
+const port = Number(argPort) || Number(process.env.PORT) || cfg.port;
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`\nPoort ${port} is al in gebruik door een ander programma op deze pc.`);
+    console.error('Kies een andere poort: pas "port" aan in config.json, of start met bijvoorbeeld:');
+    console.error('    node server.js --port 8091\n');
+  } else {
+    console.error('Server kon niet starten:', e.message);
+  }
+  process.exit(1);
+});
+
 (cfg.mode === 'control' ? syncControl() : Promise.resolve()).then(() => {
-  server.listen(cfg.port, cfg.host, () => {
-    console.log(`D-Line beheer (${cfg.mode}) op http://${cfg.host}:${cfg.port} · ${devices.length} schermen`);
+  server.listen(port, cfg.host, () => {
+    console.log(`D-Line beheer (${cfg.mode}) op http://${cfg.host}:${port} · ${devices.length} schermen`);
   });
 });
