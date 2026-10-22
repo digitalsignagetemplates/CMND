@@ -9,7 +9,9 @@ Lokale aanvulling op CMND & Control voor PPDS D-Line-schermen (Android ≥ `minA
 ## Starten
 Vereist: Node.js 18 of nieuwer. Er zijn geen npm-packages nodig.
 
-**Poort al in gebruik?** Standaard draait de tool op poort 8090. Is die bezet, dan meldt de tool dat en stopt hij. Kies dan een andere poort: zet `"port"` in `config.json` op bijvoorbeeld `8091`, of start met `node server.js --port 8091`. Open daarna http://127.0.0.1:8091.
+Dubbelklik `start.cmd`: de tool start en opent de browser. Laat het zwarte venster open zolang je de tool gebruikt.
+
+**Poort al in gebruik?** Standaard draait de tool op poort 8090. Is die bezet, dan neemt hij vanzelf de volgende vrije poort (8091, 8092, …); het adres staat in het venster. Een vaste poort kies je met `"port"` in `config.json` of met `node server.js --port 8095`.
 
 Krijg je de melding "The term 'node' is not recognized", dan staat Node.js niet op de pc. Installeer het met `winget install OpenJS.NodeJS.LTS` of via nodejs.org. Open daarna een **nieuw** PowerShell-venster, zodat het PATH wordt bijgewerkt.
 

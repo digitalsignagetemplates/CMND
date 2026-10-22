@@ -1,0 +1,3 @@
+# Windows-batchbestanden moeten CRLF-regeleinden hebben, ook in de GitHub-ZIP.
+*.cmd text eol=crlf
+*.bat text eol=crlf

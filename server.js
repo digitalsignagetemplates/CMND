@@ -363,10 +363,20 @@ if (cfg.mode === 'demo') setInterval(() => demo.poll(devices), cfg.pollSeconds *
 if (cfg.mode === 'control') setInterval(syncControl, cfg.pollSeconds * 1000);
 
 // Poort: --port 8091 bij het starten, anders omgevingsvariabele PORT, anders config.json.
+// Zonder expliciete --port/PORT probeert de tool de volgende poorten als de ingestelde bezet is.
 const argPort = (process.argv.find((a, i) => process.argv[i - 1] === '--port') || '');
-const port = Number(argPort) || Number(process.env.PORT) || cfg.port;
+const explicitPort = Number(argPort) || Number(process.env.PORT) || null;
+let port = explicitPort || cfg.port;
+let portTries = 0;
 
 server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE' && !explicitPort && portTries < 10) {
+    console.log(`Poort ${port} is bezet door een ander programma; probeer ${port + 1}...`);
+    portTries++;
+    port++;
+    server.listen(port, cfg.host);
+    return;
+  }
   if (e.code === 'EADDRINUSE') {
     console.error(`\nPoort ${port} is al in gebruik door een ander programma op deze pc.`);
     console.error('Kies een andere poort: pas "port" aan in config.json, of start met bijvoorbeeld:');
@@ -378,7 +388,16 @@ server.on('error', (e) => {
 });
 
 (cfg.mode === 'control' ? syncControl() : Promise.resolve()).then(() => {
-  server.listen(port, cfg.host, () => {
-    console.log(`D-Line beheer (${cfg.mode}) op http://${cfg.host}:${port} · ${devices.length} schermen`);
+  server.once('listening', () => {
+    const host = cfg.host === '0.0.0.0' ? '127.0.0.1' : cfg.host;
+    const url = `http://${host}:${port}`;
+    console.log(`D-Line beheer (${cfg.mode}) draait op ${url} - ${devices.length} schermen`);
+    if (controlError) console.log(`Let op: Control-database niet leesbaar: ${controlError}`);
+    console.log('Laat dit venster open zolang je de tool gebruikt. Sluiten = tool stoppen.');
+    // start.cmd zet DLINE_OPEN=1: dan meteen de browser openen.
+    if (process.env.DLINE_OPEN === '1' && process.platform === 'win32') {
+      require('child_process').exec(`start "" "${url}"`);
+    }
   });
+  server.listen(port, cfg.host);
 });
