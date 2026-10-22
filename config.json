@@ -13,7 +13,7 @@
   "host": "127.0.0.1",
   "port": 8090,
   "minAndroid": "7.1.2",
-  "modelPattern": "^\\d{2,3}BDL\\d{4}D",
+  "modelPattern": "^\\d{2,3}BDL\\d{4}[DQ]",
   "timeoutMs": 8000,
   "batchSize": 5,
   "pollSeconds": 60,

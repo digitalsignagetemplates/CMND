@@ -138,7 +138,9 @@ async function readSchedule(dev, profile, cfg) {
   for (let p = 1; p <= 7; p++) {
     const d = await send(dev, cfg, [hex(c.code), p]).catch(() => null);
     if (!d || d[0] !== hex(c.code) || d.length < 9) { pages.push(null); continue; }
-    const [, en, sh, sm, eh, em, src, days, tag] = d;
+    // Q-Line meldt het paginanummer mee in de bovenste 4 bits (bv. 0x10); alleen de onderste telt.
+    const [, enRaw, sh, sm, eh, em, src, days, tag] = d;
+    const en = enRaw & 0x0F;
     // uur 24 / minuut 60 = NULL (geen tijd ingesteld)
     const t = (h, m) => (h === 24 || m === 60 ? null : `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
     pages.push({

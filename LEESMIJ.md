@@ -1,6 +1,8 @@
 # D-Line beheer (prototype)
 
-Lokale aanvulling op CMND & Control voor PPDS D-Line-schermen (Android ≥ `minAndroid`). Functies:
+Lokale aanvulling op CMND & Control voor PPDS D-Line- en Q-Line-schermen (Android ≥ `minAndroid`).
+
+Q-Line (getest op 65BDL3550Q, SICP 2.09) leest power, bron, power save, opstartbron en schema uit. SmartPower, het gedrag na stroomuitval en de firmwareversie via SICP worden op dat model niet ondersteund. De tool toont dan de firmware uit Control. Functies:
 - power-status per scherm, met uitleg wat elke status doet
 - bulkacties: aan/uit, power-save-modus en SmartPower, opstartbron, powerschema
 - per scherm en per actie de status: verstuurd, bevestigd, mislukt of geen reactie
