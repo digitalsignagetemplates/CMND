@@ -1,0 +1,4 @@
+[
+  { "id": "lobby-1", "name": "Lobby links", "ip": "192.168.10.21", "group": "Lobby", "model": "43BDL4550D", "android": "8.0", "serial": "", "screenshotFolder": "lobby-1" },
+  { "id": "lobby-2", "name": "Lobby rechts", "ip": "192.168.10.22", "group": "Lobby", "model": "55BDL4650D", "android": "9.0", "serial": "", "screenshotFolder": "lobby-2" }
+]

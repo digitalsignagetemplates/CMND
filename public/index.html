@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>D-Line beheer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <div>
+      <h1>D-Line beheer</h1>
+      <p class="muted small">Aanvulling op CMND &amp; Control · Android ≥ <span id="minAndroid"></span></p>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <span id="mode" class="badge"></span>
+    <span id="synced" class="muted small"></span>
+  </div>
+</header>
+
+<main>
+  <div id="alerts"></div>
+
+  <section class="kpis" id="kpis"></section>
+
+  <div class="layout">
+    <section class="card devices-card">
+      <div class="card-head">
+        <h2>Schermen</h2>
+        <span id="selCount" class="chip">0 geselecteerd</span>
+      </div>
+      <div class="toolbar">
+        <input id="search" type="search" placeholder="Zoek op naam, IP, model…">
+        <select id="fGroup"><option value="">Alle groepen</option></select>
+        <select id="fPower"><option value="">Alle statussen</option></select>
+        <label class="switch"><input id="fSupported" type="checkbox" checked><span>Alleen D-Line</span></label>
+      </div>
+      <div class="tablewrap">
+        <table id="devices">
+          <thead><tr>
+            <th class="w-chk"><input id="selAll" type="checkbox" aria-label="Alles selecteren"></th>
+            <th>Scherm</th><th>Groep</th><th>Power</th><th>Power save</th><th>Bron</th><th>Firmware</th><th class="w-act"></th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="card action-card">
+      <div class="card-head"><h2>Bulkactie</h2></div>
+      <div class="segmented" role="tablist">
+        <button data-tab="power" class="active">Aan/uit</button>
+        <button data-tab="powerSave">Power save</button>
+        <button data-tab="bootSource">Bron</button>
+        <button data-tab="schedule">Schema</button>
+        <button data-tab="refresh">Uitlezen</button>
+      </div>
+
+      <div class="tab" data-panel="power">
+        <div class="radio-cards two">
+          <label class="rc"><input type="radio" name="pw" value="on" checked><span class="rc-title">Aanzetten</span><span class="muted small">Scherm uit standby halen</span></label>
+          <label class="rc"><input type="radio" name="pw" value="off"><span class="rc-title">Uitzetten</span><span class="muted small">Naar standby, gedrag volgens power-save-modus</span></label>
+        </div>
+      </div>
+
+      <div class="tab hidden" data-panel="powerSave">
+        <div id="psModes" class="radio-cards"></div>
+        <label class="field">SmartPower
+          <select id="smartPower"></select>
+        </label>
+        <p id="smartPowerInfo" class="muted small"></p>
+        <p id="psWarn" class="note warn hidden">In Mode 1 en 2 staat het netwerk in standby uit. Schema's, screenshots en updates bereiken het scherm dan niet (alleen Wake-on-LAN).</p>
+      </div>
+
+      <div class="tab hidden" data-panel="bootSource">
+        <div class="radio-cards two">
+          <label class="rc"><input type="radio" name="srcMode" value="now" checked><span class="rc-title">Nu wisselen</span><span class="muted small">Scherm schakelt direct naar deze bron</span></label>
+          <label class="rc"><input type="radio" name="srcMode" value="boot"><span class="rc-title">Bij opstarten</span><span class="muted small">Bron na aanzetten; nu verandert er niets</span></label>
+        </div>
+        <label class="field">Bron <select id="bootSource"></select></label>
+      </div>
+
+      <div class="tab hidden" data-panel="schedule">
+        <div id="schedRows"></div>
+        <button id="addSched" class="ghost">+ Regel toevoegen</button>
+        <p class="muted small">Vervangt het bestaande schema op het scherm.</p>
+      </div>
+
+      <div class="tab hidden" data-panel="refresh">
+        <p class="muted">Leest de actuele status opnieuw uit bij de geselecteerde schermen.</p>
+      </div>
+
+      <button id="run" class="primary block">Uitvoeren</button>
+      <p id="runMsg" class="muted small"></p>
+    </aside>
+  </div>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Acties</h2>
+      <div class="legend">
+        <span class="st st-verstuurd">verstuurd</span>
+        <span class="st st-bevestigd">bevestigd</span>
+        <span class="st st-mislukt">mislukt</span>
+        <span class="st st-geen_reactie">geen reactie</span>
+      </div>
+    </div>
+    <div id="actions"></div>
+  </section>
+</main>
+
+<dialog id="shot">
+  <div class="dlg-head"><strong id="shotTitle"></strong><button id="shotClose" class="ghost">Sluiten</button></div>
+  <div id="shotBody"></div>
+</dialog>
+
+<script src="app.js"></script>
+</body>
+</html>

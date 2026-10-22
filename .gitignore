@@ -1,0 +1,4 @@
+# Lokale actiehistorie en schermlijst (bevatten IP-adressen van de installatie)
+data/
+devices.json
+node_modules/

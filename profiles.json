@@ -1,0 +1,85 @@
+{
+  "dline": {
+    "label": "PPDS D-Line (Android)",
+    "verified": false,
+    "note": "Gebaseerd op handleidingen van verwante D-Line-modellen. Per model verifiëren op een testscherm en daarna 'verified' op true zetten.",
+    "powerStates": {
+      "aan": "Beeld actief, scherm reageert op commando's.",
+      "backlight_uit": "Scherm reageert op commando's, beeld is donker (standby in power-save Mode 3/4).",
+      "slaapt": "Netwerk uit; alleen te wekken met Wake-on-LAN (standby in power-save Mode 1/2).",
+      "uit": "Geen stroom of geen netwerk; geen reactie, ook niet op Wake-on-LAN."
+    },
+    "powerSaveModes": {
+      "1": {
+        "short": "Volledig uit, netwerk uit",
+        "description": "In standby gaat het scherm volledig uit (led rood). Netwerk (TCP) uit, Wake-on-LAN aan. Bij geen signaal gaat het scherm uit. Laagste verbruik.",
+        "reachableInStandby": false
+      },
+      "2": {
+        "short": "Uit, wakker bij signaal, netwerk uit",
+        "description": "In standby gaat het scherm uit (led rood). Bij geen signaal: power-saving (led oranje), gaat weer aan zodra er signaal is. Netwerk (TCP) uit, Wake-on-LAN aan.",
+        "reachableInStandby": false
+      },
+      "3": {
+        "short": "Backlight uit, netwerk blijft aan",
+        "description": "In standby gaat alleen de backlight uit (led rood). Bij geen signaal: backlight uit (led oranje), gaat weer aan zodra er signaal is. Netwerk (TCP) blijft aan, dus schema's, screenshots en commando's werken.",
+        "reachableInStandby": true
+      },
+      "4": {
+        "short": "Altijd bereikbaar, geen power-saving",
+        "description": "In standby gaat alleen de backlight uit (led rood). Gaat bij geen signaal niet in power-saving, toont 'Geen signaal'. Netwerk (TCP) altijd aan. Hoogste verbruik.",
+        "reachableInStandby": true
+      }
+    },
+    "smartPower": {
+      "uit": "Geen dimming van de backlight.",
+      "midden": "Backlight gedimd voor matige besparing.",
+      "hoog": "Backlight sterker gedimd voor maximale besparing."
+    },
+    "sources": [
+      { "id": "last", "label": "Laatste bron", "sicpCode": "0x00" },
+      { "id": "hdmi1", "label": "HDMI 1", "sicpCode": "0x0D" },
+      { "id": "hdmi2", "label": "HDMI 2", "sicpCode": "0x06" },
+      { "id": "hdmi3", "label": "HDMI 3", "sicpCode": "0x0F" },
+      { "id": "hdmi4", "label": "HDMI 4", "sicpCode": "0x19" },
+      { "id": "displayport", "label": "DisplayPort", "sicpCode": "0x0A" },
+      { "id": "usbc", "label": "USB-C", "sicpCode": "0x1F" },
+      { "id": "ops", "label": "OPS", "sicpCode": "0x0B" },
+      { "id": "mediaplayer", "label": "Media Player", "sicpCode": "0x16" },
+      { "id": "browser", "label": "Browser", "sicpCode": "0x10" },
+      { "id": "pdf_player", "label": "PDF Player", "sicpCode": "0x17" },
+      { "id": "custom_app", "label": "Custom app", "sicpCode": "0x18" },
+      { "id": "cmnd_play", "label": "CMND & Play Web", "sicpCode": "0x1D" },
+      { "id": "kiosk", "label": "Kiosk", "sicpCode": "0x20" },
+      { "id": "home", "label": "Home (launcher)", "sicpCode": "0x1E" }
+    ],
+    "sourceNote": "Broncodes volgens SICP 2.09 §4.4 (via open-source D-Line-integratie), Custom (0x18) bevestigd op 50BDL4650D.",
+    "smartPowerCodes": { "0x00": "uit", "0x01": "uit", "0x02": "midden", "0x03": "hoog" },
+    "sicp": {
+      "powerGet": { "code": "0x19", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22" },
+      "sourceGet": { "code": "0xAD", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22" },
+      "sourceSet": { "code": "0xAC", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (HDMI 1 en terug naar Custom)", "documented": "SICP 2.13 §5.1 (Input Source)" },
+      "smartPowerGet": { "code": "0xDE", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22" },
+      "powerSet": { "code": "0x18", "on": "0x02", "off": "0x01", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (uit/aan, ACK + teruglezen)" },
+      "smartPowerSet": { "code": "0xDD", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (gezet + hersteld)", "documented": "SICP 2.13 §4.3.2" },
+      "powerSaveGet": { "code": "0xD3", "verified": true, "verifiedOn": "4650D/5050D, 2026-10-22" },
+      "powerSaveSet": { "code": "0xD2", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (Mode 3 gezet + hersteld)", "documented": "SICP 2.13 §4.3.1" },
+      "bootSourceGet": { "code": "0xBA", "verified": true, "verifiedOn": "4650D/5050D, 2026-10-22" },
+      "bootSourceSet": { "code": "0xBB", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (HDMI 1 gezet + hersteld)", "documented": "SICP 2.13 §5.2" },
+      "coldStartGet": { "code": "0xA4", "verified": true, "verifiedOn": "4650D/5050D, 2026-10-22" },
+      "scheduleGet": { "code": "0x5B", "verified": true, "verifiedOn": "4650D/5050D, 2026-10-22", "documented": "SICP 2.13 §10.1" },
+      "scheduleSet": { "code": "0x5A", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (pagina 7 gezet + hersteld)", "documented": "SICP 2.13 §10.1" },
+      "scheduleReset": { "code": "0x60", "verified": false, "documented": "SICP 2.13 §10.3" },
+      "screenshotAvailable": { "code": "0x7E", "verified": false, "documented": "SICP 2.13 §11.10" },
+      "screenshotSend": { "code": "0x58", "verified": false, "documented": "SICP 2.13 §11.9 (screenshot wordt gemaild)" }
+    },
+    "documentation": "The SICP Commands Document V2.13 (PPDS)",
+    "powerSaveCodes": { "0x04": "1", "0x05": "2", "0x06": "3", "0x07": "4" },
+    "coldStartCodes": { "0x00": "uit", "0x01": "altijd aan", "0x02": "laatste status" },
+    "coldStartInfo": {
+      "uit": "Na stroomuitval blijft het scherm uit.",
+      "altijd aan": "Na stroomuitval gaat het scherm altijd aan.",
+      "laatste status": "Na stroomuitval keert het scherm terug naar de status van voor de stroomuitval."
+    }
+  }
+}

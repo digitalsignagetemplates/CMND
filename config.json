@@ -1,0 +1,31 @@
+{
+  "mode": "control",
+  "db": {
+    "mysqlExe": "C:\\Program Files (x86)\\MySQL\\MySQL Server 5.7\\bin\\mysql.exe",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "user": "smartcontrol",
+    "database": "smartcontroldb",
+    "password": "",
+    "androidByModel": {},
+    "passwordFromProperties": "C:\\Program Files (x86)\\CMND\\Tomcat 9.0\\webapps\\smartcontrol\\WEB-INF\\classes\\application-production.properties"
+  },
+  "host": "127.0.0.1",
+  "port": 8090,
+  "minAndroid": "7.1.2",
+  "modelPattern": "^\\d{2,3}BDL\\d{4}D",
+  "timeoutMs": 8000,
+  "batchSize": 5,
+  "pollSeconds": 60,
+  "sicp": {
+    "port": 5000,
+    "monitorId": 1,
+    "allowUnverified": false
+  },
+  "devicesFile": "devices.json",
+  "screenshotDir": "",
+  "auth": {
+    "user": "",
+    "password": ""
+  }
+}
