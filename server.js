@@ -54,7 +54,7 @@ async function pool(items, n, fn) {
 }
 
 // Velden die uit Control komen; de rest (live SICP-waarden) blijft van het bestaande object.
-const CONTROL_FIELDS = ['controlId', 'name', 'ip', 'sicpPort', 'group', 'model', 'android', 'firmware', 'serial', 'sicpVersion', 'powerRaw', 'controlSource', 'raw'];
+const CONTROL_FIELDS = ['controlId', 'name', 'ip', 'sicpPort', 'group', 'model', 'android', 'firmware', 'serial', 'sicpVersion', 'powerRaw', 'controlSource', 'raw', 'ftp'];
 
 // Control-modus: schermlijst komt uit smartcontroldb. Bestaande scherm-objecten
 // worden ter plekke bijgewerkt, zodat lopende acties op hetzelfde object blijven werken.
@@ -108,8 +108,28 @@ const driver = {
   screenshot: (dev) => (cfg.mode === 'demo' ? demo.screenshot(dev) : sicp.screenshot(dev, cfg)),
 };
 
+// ---------- firmware ----------
+// Map: firmware/<serie>/update.zip + version.txt, bv. firmware/4650D/ met "1.028".
+
+const FW_DIR = path.resolve(ROOT, cfg.firmwareDir || 'firmware');
+const seriesOf = (model) => (String(model || '').match(/BDL(\d{4}[A-Z])/i) || [])[1]?.toUpperCase() || null;
+
+function firmwareCatalog() {
+  if (!fs.existsSync(FW_DIR)) return {};
+  const out = {};
+  for (const series of fs.readdirSync(FW_DIR)) {
+    const file = path.join(FW_DIR, series, 'update.zip');
+    const vfile = path.join(FW_DIR, series, 'version.txt');
+    if (!fs.existsSync(file) || !fs.existsSync(vfile)) continue;
+    out[series.toUpperCase()] = { file, version: fs.readFileSync(vfile, 'utf8').trim(), size: fs.statSync(file).size };
+  }
+  return out;
+}
+
 function publicDevice(d) {
-  return { ...d, ...supportInfo(d) };
+  const { ftp, ...rest } = d; // FTP-wachtwoord nooit naar de browser
+  const fw = firmwareCatalog()[seriesOf(d.model)];
+  return { ...rest, ...supportInfo(d), hasFtp: !!(ftp && ftp.user), fwAvailable: fw ? fw.version : null };
 }
 
 // ---------- acties ----------
@@ -120,7 +140,7 @@ try {
   for (const l of lines.slice(-200)) actions.push(JSON.parse(l));
 } catch { /* nog geen historie */ }
 
-const ACTION_TYPES = ['power', 'powerSave', 'source', 'bootSource', 'schedule', 'refresh', 'screenshot'];
+const ACTION_TYPES = ['power', 'powerSave', 'source', 'bootSource', 'schedule', 'refresh', 'screenshot', 'firmware'];
 
 function validate(type, params) {
   if (!ACTION_TYPES.includes(type)) return `Onbekende actie: ${type}`;
@@ -164,8 +184,15 @@ async function runTarget(action, t) {
   }
   try {
     // Aan/uit wacht op het opstarten; schema en uitlezen doen meerdere commando's. Daarom ruimere time-out.
-    const ms = ['power', 'schedule', 'refresh', 'source'].includes(action.type) ? cfg.timeoutMs + 40000 : cfg.timeoutMs * 2;
-    const res = await withTimeout(driver.execute(dev, action.type, action.params), ms);
+    // Firmware: upload + herstart + teruglezen, dat duurt al gauw een half uur.
+    let ms = ['power', 'schedule', 'refresh', 'source'].includes(action.type) ? cfg.timeoutMs + 40000 : cfg.timeoutMs * 2;
+    let params = action.params;
+    if (action.type === 'firmware') {
+      ms = ((cfg.firmwareWaitMinutes || 25) + 30) * 60000;
+      const fw = firmwareCatalog()[seriesOf(dev.model)];
+      params = { ...action.params, resolved: fw ? { [dev.id]: fw } : {}, onStep: (d, msg) => { t.detail = msg; } };
+    }
+    const res = await withTimeout(driver.execute(dev, action.type, params), ms);
     t.status = res.ok ? 'bevestigd' : res.noReply ? 'geen_reactie' : 'mislukt';
     t.detail = res.ok ? res.detail || '' : res.error;
   } catch (e) {
@@ -176,7 +203,9 @@ async function runTarget(action, t) {
 }
 
 async function runAction(action) {
-  await pool(action.targets, cfg.batchSize, (t) => runTarget(action, t));
+  // Firmware standaard één scherm tegelijk.
+  const n = action.type === 'firmware' ? (cfg.firmwareConcurrency || 1) : cfg.batchSize;
+  await pool(action.targets, n, (t) => runTarget(action, t));
   action.finishedAt = new Date().toISOString();
   persist(action);
 }
@@ -192,9 +221,11 @@ function createAction(body, user) {
     if (!dev) continue;
     const s = supportInfo(dev);
     if (!s.supported) skipped.push({ deviceId: id, reason: s.reason });
+    else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
     else targets.push({ deviceId: id, name: dev.name, status: 'wachtrij', detail: '' });
   }
-  if (!targets.length) return { error: 'Geen ondersteunde schermen geselecteerd', skipped };
+  if (!targets.length) return { error: type === 'firmware' ? 'Geen geselecteerd scherm heeft firmware klaarstaan in de map' : 'Geen ondersteunde schermen geselecteerd', skipped };
+  if (type === 'firmware' && params.confirm !== 'UPGRADE') return { error: 'Bevestig de firmware-upgrade door UPGRADE te typen' };
   const action = {
     id: crypto.randomUUID(), type, params, user, createdAt: new Date().toISOString(),
     finishedAt: null, targets, skipped,
@@ -298,6 +329,9 @@ const server = http.createServer(async (req, res) => {
       });
     }
     if (req.method === 'GET' && p === '/api/devices') return send(res, 200, devices.map(publicDevice));
+    if (req.method === 'GET' && p === '/api/firmware') {
+      return send(res, 200, { dir: FW_DIR, series: Object.fromEntries(Object.entries(firmwareCatalog()).map(([k, v]) => [k, { version: v.version, size: v.size }])) });
+    }
     if (req.method === 'GET' && p === '/api/actions') return send(res, 200, [...actions].reverse().slice(0, 50));
     if (req.method === 'POST' && p === '/api/actions') {
       if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });

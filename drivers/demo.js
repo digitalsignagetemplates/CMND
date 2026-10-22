@@ -74,6 +74,8 @@ async function execute(dev, type, params) {
       break;
     case 'screenshot':
       return { ok: true, detail: 'Screenshot gemaakt (gesimuleerd)' };
+    case 'firmware':
+      return { ok: true, detail: 'Firmware-upgrade (gesimuleerd)' };
     case 'schedule':
       dev.schedule = params.entries;
       break;

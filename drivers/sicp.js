@@ -5,6 +5,7 @@
 const net = require('net');
 const fs = require('fs');
 const path = require('path');
+const ftp = require('./ftp');
 
 const hex = (v) => (typeof v === 'string' ? parseInt(v, 16) : v);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -105,7 +106,19 @@ async function refreshAll(dev, profile, cfg) {
       if (name === 'coldStartGet') dev.coldStart = null;
     }
   }
+  const fw = await readFirmware(dev, profile, cfg).catch(() => null);
+  if (fw) dev.fwVersion = fw;
 }
+
+// SICP 2.13 §3.x "Model & Firmware Information": 0xA1 met 0x01 = firmwareversie (ASCII, bv. "1.027").
+async function readFirmware(dev, profile, cfg) {
+  const c = command(profile, cfg, 'firmwareGet');
+  const d = await send(dev, cfg, [hex(c.code), 0x01]);
+  if (d[0] !== hex(c.code)) return null;
+  return Buffer.from(d.slice(1)).toString('latin1').replace(/\0/g, '').trim() || null;
+}
+
+const sameVersion = (a, b) => String(a || '').replace(/^v/i, '').trim() === String(b || '').replace(/^v/i, '').trim();
 
 // Schema-pagina volgens SICP 2.13 §10.1.3:
 // [pagina<<4 | aan, start-uur, start-min, eind-uur, eind-min, bron, dagen, tag]
@@ -238,6 +251,40 @@ async function execute(dev, type, params, profile, cfg) {
       const c = command(profile, cfg, 'screenshotSend');
       const r = ackResult(await send(dev, cfg, [hex(c.code)]));
       return r.ok ? { ok: true, detail: 'Screenshot gemaakt; het scherm mailt hem naar het ingestelde e-mailadres' } : r;
+    }
+    case 'firmware': {
+      // SICP 2.13 §11.13: update.zip in de hoofdmap van het scherm, daarna 0x20 0x00.
+      // params.file / params.version worden door de server per model ingevuld.
+      const fw = params.resolved && params.resolved[dev.id];
+      if (!fw) return { ok: false, error: 'Geen firmwarebestand gevonden voor dit model' };
+      const before = await readFirmware(dev, profile, cfg);
+      if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
+      if (dev.power !== 'aan') return { ok: false, error: 'Scherm moet aan staan voor een firmware-upgrade' };
+      // Lukt de FTP-upload niet, dan wordt de upgrade (0x20) niet gestart.
+      // Control bewaart het FTP-wachtwoord versleuteld; daarom heeft config.displayFtp voorrang.
+      const login = cfg.displayFtp && cfg.displayFtp.user ? cfg.displayFtp : dev.ftp;
+      if (!login || !login.user || !login.password) return { ok: false, error: 'Geen FTP-gegevens: vul displayFtp in config.json in' };
+      const upgrade = command(profile, cfg, 'firmwareUpgrade');
+      if (params.onStep) params.onStep(dev, `upload ${fw.version} gestart`);
+      await ftp.upload(dev.ip, { port: login.port || 2121, user: login.user, password: login.password }, fw.file, 'update.zip', (sent, size) => {
+        if (params.onStep) params.onStep(dev, `upload ${Math.floor((sent / size) * 100)}%`);
+      }, 120000);
+      if (params.onStep) params.onStep(dev, 'upload klaar, upgrade starten');
+      const r = await send(dev, cfg, [hex(upgrade.code), 0x00]);
+      const started = (r[0] === hex(upgrade.code) && r[1] === 0x06) || ackResult(r).ok;
+      if (!started) return { ok: false, error: `Upgrade niet gestart: ${ackResult(r).error}` };
+      // Het scherm herstart en is 5+ minuten bezig; daarna de versie teruglezen.
+      const deadline = Date.now() + (cfg.firmwareWaitMinutes || 25) * 60000;
+      let last = null;
+      while (Date.now() < deadline) {
+        await sleep(30000);
+        last = await readFirmware(dev, profile, cfg).catch(() => null) || last;
+        if (params.onStep) params.onStep(dev, last ? `bezig, scherm meldt ${last}` : 'bezig, scherm herstart');
+        if (sameVersion(last, fw.version)) return { ok: true, detail: `${before} → ${last}` };
+      }
+      return last
+        ? { ok: false, error: `Na upgrade meldt scherm ${last}, verwacht ${fw.version}` }
+        : { ok: false, noReply: true, error: 'Scherm reageert niet meer na de upgrade; controleer het ter plekke' };
     }
     default:
       return { ok: false, error: `onbekende actie ${type}` };

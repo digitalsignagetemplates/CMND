@@ -71,6 +71,8 @@
       "scheduleSet": { "code": "0x5A", "verified": true, "verifiedOn": "50BDL4650D, 2026-10-22 (pagina 7 gezet + hersteld)", "documented": "SICP 2.13 §10.1" },
       "scheduleReset": { "code": "0x60", "verified": false, "documented": "SICP 2.13 §10.3" },
       "screenshotAvailable": { "code": "0x7E", "verified": false, "documented": "SICP 2.13 §11.10" },
+      "firmwareGet": { "code": "0xA1", "verified": true, "verifiedOn": "4650D/5050D, 2026-10-22", "documented": "SICP 2.13 Model & Firmware Information" },
+      "firmwareUpgrade": { "code": "0x20", "verified": false, "documented": "SICP 2.13 §11.13 (vanaf SICP 2.06)" },
       "screenshotSend": { "code": "0x58", "verified": false, "documented": "SICP 2.13 §11.9 (screenshot wordt gemaild)" }
     },
     "documentation": "The SICP Commands Document V2.13 (PPDS)",

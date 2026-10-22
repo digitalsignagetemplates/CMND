@@ -2,3 +2,5 @@
 data/
 devices.json
 node_modules/
+# Firmwarebestanden (groot, per installatie te downloaden bij PPDS)
+firmware/

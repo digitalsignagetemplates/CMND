@@ -23,6 +23,14 @@
     "allowUnverified": false
   },
   "devicesFile": "devices.json",
+  "firmwareDir": "firmware",
+  "firmwareConcurrency": 1,
+  "firmwareWaitMinutes": 25,
+  "displayFtp": {
+    "port": 2121,
+    "user": "",
+    "password": ""
+  },
   "screenshotDir": "",
   "auth": {
     "user": "",

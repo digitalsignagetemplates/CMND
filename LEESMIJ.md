@@ -9,6 +9,8 @@ Lokale aanvulling op CMND & Control voor PPDS D-Line-schermen (Android ≥ `minA
 ## Starten
 Vereist: Node.js 18 of nieuwer. Er zijn geen npm-packages nodig.
 
+Krijg je de melding "The term 'node' is not recognized", dan staat Node.js niet op de pc. Installeer het met `winget install OpenJS.NodeJS.LTS` of via nodejs.org. Open daarna een **nieuw** PowerShell-venster, zodat het PATH wordt bijgewerkt.
+
 ```
 node server.js
 ```
@@ -32,6 +34,15 @@ Bron voor alle codes: *The SICP Commands Document V2.13* van PPDS.
 | Powerschema uitlezen/instellen | 0x5B / 0x5A (+ reset 0x60) | getest op 50BDL4650D; reset 0x60 gedocumenteerd, niet apart getest |
 | Screenshot laten maken | 0x58 (+ 0x7E beschikbaarheid) | het scherm **mailt** de screenshot; e-mail moet op het scherm ingesteld zijn |
 | Screenshot bekijken | – | nieuwste afbeelding uit `screenshotDir\<screenshotFolder, serienummer of IP>` |
+
+| Firmwareversie uitlezen | 0xA1 0x01 | getest (bv. 1.027) |
+| Firmware-upgrade | FTP-upload `update.zip` + 0x20 | gedocumenteerd (§11.13), **nog niet op een scherm getest** |
+
+### Firmware-upgrade
+1. Download de firmware (`update.zip`) per serie bij PPDS, bijvoorbeeld via het One_Link-overzicht.
+2. Zet hem in `firmware\<serie>\update.zip` en de versie in `firmware\<serie>\version.txt` (zoals het scherm hem meldt, bv. `1.028`). `<serie>` is bijvoorbeeld `4650D` of `5050D`.
+3. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
+4. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 

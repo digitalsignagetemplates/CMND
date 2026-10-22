@@ -5,7 +5,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const DAYS = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
 const POWER_LABEL = { aan: 'Aan', backlight_uit: 'Backlight uit', slaapt: 'Slaapt', uit: 'Uit', onbekend: 'Onbekend' };
 const STATUS_LABEL = { wachtrij: 'wachtrij', verstuurd: 'verstuurd', bevestigd: 'bevestigd', mislukt: 'mislukt', geen_reactie: 'geen reactie', niet_getest: 'niet verstuurd (niet getest)' };
-const TYPE_LABEL = { power: 'Aan/uit', powerSave: 'Power save', source: 'Bron wisselen', bootSource: 'Opstartbron', schedule: 'Powerschema', refresh: 'Status uitlezen', screenshot: 'Screenshot maken' };
+const TYPE_LABEL = { power: 'Aan/uit', powerSave: 'Power save', source: 'Bron wisselen', bootSource: 'Opstartbron', schedule: 'Powerschema', refresh: 'Status uitlezen', screenshot: 'Screenshot maken', firmware: 'Firmware-upgrade' };
 
 let info;
 let devices = [];
@@ -94,7 +94,8 @@ function renderDevices() {
       <td>${d.currentSource ? esc(sourceLabel(d.currentSource)) : '<span class="muted small">–</span>'}
         <div class="dev-sub" title="Bron waarop het scherm opstart">opstart: ${d.bootSource ? esc(sourceLabel(d.bootSource)) : '?'}</div>
         <div class="dev-sub" title="${esc(scheduleText(d.schedule) || 'Schema nog niet uitgelezen: gebruik Uitlezen')}">schema: ${scheduleSummary(d.schedule)}</div></td>
-      <td class="muted">${esc(d.android ? `Android ${d.android}` : d.firmware || '–')}</td>
+      <td class="muted"><div>${esc(d.fwVersion || '–')}</div>
+        <div class="dev-sub">${esc(d.firmware || '')}${d.fwAvailable && d.fwVersion && d.fwAvailable !== d.fwVersion ? ` · <strong>update ${esc(d.fwAvailable)}</strong>` : ''}</div></td>
       <td><button class="icon" data-shot="${esc(d.id)}">Screenshot</button></td>
     </tr>`;
   });
@@ -173,6 +174,7 @@ function collectParams() {
       return params;
     }
     case 'bootSource': return { source: $('#bootSource').value };
+    case 'firmware': return { confirm: $('#fwConfirm').value.trim() };
     case 'schedule': return {
       entries: $$('.schedrow').map((r) => ({
         days: $$('.days input:checked', r).map((c) => Number(c.value)),
@@ -197,6 +199,11 @@ function confirmText(params) {
       : `Opstartbron → ${sourceLabel(params.source)}\n(geldt pas bij de volgende keer aanzetten)`;
   }
   if (tab === 'schedule') what = `Powerschema vervangen (${params.entries.length} regel(s))`;
+  if (tab === 'firmware') {
+    const sel = devices.filter((d) => selected.has(d.id));
+    what = 'FIRMWARE-UPGRADE\n' + sel.map((d) => `${d.name}: ${d.fwVersion || '?'} → ${d.fwAvailable || 'geen firmware in map'}`).join('\n')
+      + '\n\nDe schermen herstarten en zijn 10–30 minuten niet beschikbaar.';
+  }
   return `${what}\n\nUitvoeren op ${selected.size} scherm(en)?`;
 }
 
@@ -309,8 +316,15 @@ async function init() {
   };
   $('#devices').addEventListener('click', (e) => { if (e.target.dataset.shot) showShot(e.target.dataset.shot); });
   $('#shotClose').onclick = () => $('#shot').close();
-  $$('.segmented button').forEach((b) => b.onclick = () => {
+  $$('.segmented button').forEach((b) => b.onclick = async () => {
     tab = b.dataset.tab;
+    if (tab === 'firmware') {
+      const fw = await api('/api/firmware').catch(() => ({ series: {} }));
+      const list = Object.entries(fw.series).map(([s, v]) => `${s}: ${v.version} (${Math.round(v.size / 1048576)} MB)`);
+      $('#fwInfo').innerHTML = list.length
+        ? `Klaar in de firmwaremap: ${esc(list.join(' · '))}`
+        : `Nog geen firmware klaargezet. Zet per serie <code>update.zip</code> en <code>version.txt</code> in <code>${esc(fw.dir || 'firmware')}\\&lt;serie&gt;\\</code>, bijvoorbeeld <code>4650D</code>.`;
+    }
     $$('.segmented button').forEach((x) => x.classList.toggle('active', x === b));
     $$('.tab').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== tab));
   });

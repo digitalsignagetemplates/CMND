@@ -21,7 +21,9 @@ function query(db, sql) {
       const [head, ...rows] = stdout.trim().split(/\r?\n/);
       if (!head) return resolve([]);
       const cols = head.split('\t');
-      resolve(rows.map((r) => Object.fromEntries(r.split('\t').map((v, i) => [cols[i], v === 'NULL' ? null : v]))));
+      // --batch escapet tab, newline en backslash; terugvertalen.
+      const unesc = (v) => v.replace(/\\([tn0\\])/g, (m, c) => ({ t: '\t', n: '\n', 0: '\0', '\\': '\\' }[c]));
+      resolve(rows.map((r) => Object.fromEntries(r.split('\t').map((v, i) => [cols[i], v === 'NULL' ? null : unesc(v)]))));
     });
   });
 }
@@ -29,8 +31,11 @@ function query(db, sql) {
 const DEVICE_SQL = `
 SELECT d.id, d.name, d.address, d.model_number, d.serial_code, d.platform_label, d.platform_version,
        d.firmware_version_android, d.firmware_version_scaler, d.sicp_version, d.power_state,
-       d.source_label, d.operating_hours, d.temperature_one, g.name AS group_name
-FROM devices d LEFT JOIN \`groups\` g ON g.id = d.group_id`;
+       d.source_label, d.operating_hours, d.temperature_one, g.name AS group_name,
+       d.ftp_settings_use_default, d.ftp_settings_port, d.ftp_settings_username, d.ftp_settings_password,
+       s.default_ftp_settings_port, s.default_ftp_settings_username, s.default_ftp_settings_password
+FROM devices d LEFT JOIN \`groups\` g ON g.id = d.group_id
+LEFT JOIN (SELECT * FROM settings LIMIT 1) s ON 1 = 1`;
 
 // Control bewaart geen Android-versie (platform_version is de board-versie,
 // firmware_version_android de PPDS-firmware, bijv. FB01.18). Optioneel per model in te vullen.
@@ -74,6 +79,10 @@ async function loadDevices(db) {
     schedule: [],
     lastSeen: null,
     raw: { platform_label: r.platform_label, platform_version: r.platform_version, firmware_version_android: r.firmware_version_android, firmware_version_scaler: r.firmware_version_scaler, operating_hours: r.operating_hours, temperature_one: r.temperature_one },
+    // FTP-server op het scherm (zelfde gegevens die Control gebruikt). Wordt nooit via de API getoond.
+    ftp: r.ftp_settings_use_default === '0'
+      ? { port: Number(r.ftp_settings_port) || 2121, user: r.ftp_settings_username, password: r.ftp_settings_password }
+      : { port: Number(r.default_ftp_settings_port) || 2121, user: r.default_ftp_settings_username, password: r.default_ftp_settings_password },
     };
   });
 }

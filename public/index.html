@@ -56,6 +56,7 @@
         <button data-tab="bootSource">Bron</button>
         <button data-tab="schedule">Schema</button>
         <button data-tab="refresh">Uitlezen</button>
+        <button data-tab="firmware">Firmware</button>
       </div>
 
       <div class="tab" data-panel="power">
@@ -86,6 +87,12 @@
         <div id="schedRows"></div>
         <button id="addSched" class="ghost">+ Regel toevoegen</button>
         <p class="muted small">Vervangt het bestaande schema op het scherm.</p>
+      </div>
+
+      <div class="tab hidden" data-panel="firmware">
+        <p class="note warn">Een firmware-upgrade duurt per scherm 10–30 minuten en het scherm herstart. Onderbreek de stroom niet. De tool doet standaard één scherm tegelijk.</p>
+        <div id="fwInfo" class="muted small"></div>
+        <label class="field">Typ UPGRADE om te bevestigen <input id="fwConfirm" type="search" autocomplete="off" placeholder="UPGRADE"></label>
       </div>
 
       <div class="tab hidden" data-panel="refresh">
