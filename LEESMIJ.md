@@ -50,7 +50,12 @@ Bron voor alle codes: *The SICP Commands Document V2.13* van PPDS.
 1. Download de firmware (`update.zip`) per serie bij PPDS, bijvoorbeeld via het One_Link-overzicht.
 2. Zet hem in `firmware\<serie>\update.zip` en de versie in `firmware\<serie>\version.txt` (zoals het scherm hem meldt, bv. `1.028`). `<serie>` is bijvoorbeeld `4650D` of `5050D`.
 3. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
-4. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
+4. **Voortest (start geen upgrade):** `node tools\test-firmware.js <ip>`. Het script controleert:
+   - de firmwareversie via SICP, en welke notatie je in `version.txt` moet gebruiken;
+   - de FTP-login;
+   - het uploaden van een testbestand van 1 MB, dat daarna weer wordt verwijderd;
+   - hoe lang de upload van `update.zip` ongeveer duurt.
+5. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 

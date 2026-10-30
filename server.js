@@ -222,6 +222,9 @@ function createAction(body, user) {
     const s = supportInfo(dev);
     if (!s.supported) skipped.push({ deviceId: id, reason: s.reason });
     else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
+    else if (type === 'firmware' && actions.some((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((x) => x.deviceId === id))) {
+      skipped.push({ deviceId: id, reason: 'Er loopt al een firmware-upgrade op dit scherm' });
+    }
     else targets.push({ deviceId: id, name: dev.name, status: 'wachtrij', detail: '' });
   }
   if (!targets.length) return { error: type === 'firmware' ? 'Geen geselecteerd scherm heeft firmware klaarstaan in de map' : 'Geen ondersteunde schermen geselecteerd', skipped };

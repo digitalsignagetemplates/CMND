@@ -78,6 +78,8 @@ async function upload(host, ftp, localFile, remoteName, onProgress, timeoutMs = 
     const started = c.cmd(`STOR ${remoteName}`);
     const first = await started;
     if (![125, 150].includes(first.code)) { data.destroy(); throw new Error(`FTP STOR: ${first.text}`); }
+    // Tijdens de overdracht is het stuurkanaal stil; de idle-time-out geldt dan alleen voor het datakanaal.
+    c.sock.setTimeout(0);
     let sent = 0;
     await new Promise((res, rej) => {
       const rs = fs.createReadStream(localFile);
@@ -87,6 +89,7 @@ async function upload(host, ftp, localFile, remoteName, onProgress, timeoutMs = 
       data.on('close', res);
       rs.pipe(data);
     });
+    c.sock.setTimeout(timeoutMs, () => { c.sock.destroy(new Error('FTP time-out')); });
     await expect(c.next(), [226, 250], 'upload');
     const sz = await c.cmd(`SIZE ${remoteName}`);
     if (sz.code === 213 && Number(sz.text.split(' ').pop()) !== size) {
@@ -99,4 +102,15 @@ async function upload(host, ftp, localFile, remoteName, onProgress, timeoutMs = 
   }
 }
 
-module.exports = { check, upload };
+// Verwijdert een bestand op het scherm (gebruikt door het testscript).
+async function remove(host, ftp, remoteName, timeoutMs = 10000) {
+  const c = await login(host, ftp, timeoutMs);
+  try {
+    await expect(c.cmd(`DELE ${remoteName}`), [250], 'DELE');
+  } finally {
+    c.cmd('QUIT').catch(() => {});
+    c.sock.end();
+  }
+}
+
+module.exports = { check, upload, remove };

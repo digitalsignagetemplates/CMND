@@ -259,13 +259,20 @@ async function execute(dev, type, params, profile, cfg) {
       // params.file / params.version worden door de server per model ingevuld.
       const fw = params.resolved && params.resolved[dev.id];
       if (!fw) return { ok: false, error: 'Geen firmwarebestand gevonden voor dit model' };
-      const before = await readFirmware(dev, profile, cfg);
+      const before = await readFirmware(dev, profile, cfg).catch(() => null);
+      // Zonder uitleesbare versie is de upgrade achteraf niet te bevestigen: dan niet starten.
+      if (!before) return { ok: false, error: 'Firmwareversie niet uitleesbaar via SICP (0xA1); upgrade niet gestart omdat het resultaat niet te controleren is' };
       if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
+      // version.txt moet dezelfde notatie hebben als het scherm meldt (bv. 1.028, niet FB01.19).
+      if (/^\d+\.\d+/.test(before) !== /^\d+\.\d+/.test(String(fw.version).replace(/^v/i, ''))) {
+        return { ok: false, error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
+      }
       if (dev.power !== 'aan') return { ok: false, error: 'Scherm moet aan staan voor een firmware-upgrade' };
       // Lukt de FTP-upload niet, dan wordt de upgrade (0x20) niet gestart.
       // Control bewaart het FTP-wachtwoord versleuteld; daarom heeft config.displayFtp voorrang.
       const login = cfg.displayFtp && cfg.displayFtp.user ? cfg.displayFtp : dev.ftp;
       if (!login || !login.user || !login.password) return { ok: false, error: 'Geen FTP-gegevens: vul displayFtp in config.json in' };
+      if (login === dev.ftp) return { ok: false, error: 'Vul displayFtp in config.json in: het FTP-wachtwoord in Control is versleuteld en werkt niet' };
       const upgrade = command(profile, cfg, 'firmwareUpgrade');
       if (params.onStep) params.onStep(dev, `upload ${fw.version} gestart`);
       await ftp.upload(dev.ip, { port: login.port || 2121, user: login.user, password: login.password }, fw.file, 'update.zip', (sent, size) => {
@@ -284,6 +291,7 @@ async function execute(dev, type, params, profile, cfg) {
         if (params.onStep) params.onStep(dev, last ? `bezig, scherm meldt ${last}` : 'bezig, scherm herstart');
         if (sameVersion(last, fw.version)) return { ok: true, detail: `${before} → ${last}` };
       }
+      if (last && !sameVersion(last, before)) return { ok: false, error: `Firmware gewijzigd naar ${last}, maar verwacht ${fw.version}; controleer version.txt` };
       return last
         ? { ok: false, error: `Na upgrade meldt scherm ${last}, verwacht ${fw.version}` }
         : { ok: false, noReply: true, error: 'Scherm reageert niet meer na de upgrade; controleer het ter plekke' };
