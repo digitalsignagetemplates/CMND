@@ -14,7 +14,17 @@ const os = require('os');
 
 const ROOT = __dirname;
 const readJson = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8'));
-const cfg = readJson('config.json');
+// config.local.json (niet in git) overschrijft config.json, bv. voor wachtwoorden.
+function loadConfig() {
+  const base = readJson('config.json');
+  if (!fs.existsSync(path.join(ROOT, 'config.local.json'))) return base;
+  const local = readJson('config.local.json');
+  for (const [k, v] of Object.entries(local)) {
+    base[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(base[k] || {}), ...v } : v;
+  }
+  return base;
+}
+const cfg = loadConfig();
 const profiles = readJson('profiles.json');
 const profile = profiles.dline;
 const DATA_DIR = path.join(ROOT, 'data');

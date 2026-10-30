@@ -1,6 +1,8 @@
 # Lokale actiehistorie en schermlijst (bevatten IP-adressen van de installatie)
 data/
 devices.json
+# Lokale instellingen met wachtwoorden
+config.local.json
 node_modules/
 # Firmwarebestanden (groot, per installatie te downloaden bij PPDS)
 firmware/

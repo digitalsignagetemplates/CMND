@@ -13,6 +13,11 @@ const ftp = require('../drivers/ftp');
 const host = process.argv[2];
 if (!host) { console.error('Gebruik: node tools\\test-firmware.js <ip-van-testscherm>'); process.exit(1); }
 const cfg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'config.json'), 'utf8'));
+const localFile = path.join(__dirname, '..', 'config.local.json');
+if (fs.existsSync(localFile)) {
+  const local = JSON.parse(fs.readFileSync(localFile, 'utf8'));
+  for (const [k, v] of Object.entries(local)) cfg[k] = v && typeof v === 'object' ? { ...(cfg[k] || {}), ...v } : v;
+}
 
 const sicp = (data) => new Promise((resolve) => {
   const s = net.createConnection({ host, port: cfg.sicp.port });
