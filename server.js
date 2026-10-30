@@ -44,6 +44,9 @@ function compareVersion(a, b) {
 }
 
 function supportInfo(dev) {
+  if (dev.identityMismatch) {
+    return { supported: false, reason: `Op ${dev.ip} antwoordt een ander apparaat (${dev.identityMismatch.model || '?'}, serienr ${dev.identityMismatch.serial || '?'}). Werk het IP-adres bij in Control.` };
+  }
   if (!new RegExp(cfg.modelPattern, 'i').test(dev.model || '')) return { supported: false, reason: 'Geen Philips-signagemodel (xxBDLnnnnX)' };
   // Control slaat de Android-versie niet op; onbekend telt als toegestaan (alle D-Line vanaf 4550D draaien Android 8+).
   if (!dev.android) return { supported: true, reason: 'Android-versie niet bekend in Control' };
@@ -80,6 +83,7 @@ async function syncControl() {
     devices = fresh.map((d) => {
       const prev = byId.get(d.id);
       if (!prev) return d;
+      if (prev.ip !== d.ip) prev.identityMismatch = null; // nieuw IP in Control: opnieuw controleren
       for (const k of CONTROL_FIELDS) prev[k] = d[k];
       return prev;
     });
@@ -87,7 +91,8 @@ async function syncControl() {
     controlSettings = await control.loadSettings(cfg.db).catch(() => ({}));
     controlError = null;
     // Status live uitlezen (alleen-lezen SICP-queries) bij ondersteunde schermen.
-    await pool(devices.filter((d) => supportInfo(d).supported), cfg.batchSize, (d) =>
+    // Ook schermen met een identiteitsprobleem blijven we (alleen-lezend) controleren.
+    await pool(devices.filter((d) => supportInfo(d).supported || d.identityMismatch), cfg.batchSize, (d) =>
       withTimeout(sicp.execute(d, 'refresh', { quick: true }, profile, cfg), cfg.timeoutMs * 3)
         .catch(() => { d.power = 'onbekend'; }));
   } catch (e) {

@@ -142,7 +142,8 @@ function renderDevices() {
     return `<tr class="${d.supported ? '' : 'unsupported'} ${selected.has(d.id) ? 'sel' : ''}" title="${esc(d.reason)}">
       <td><input type="checkbox" data-id="${esc(d.id)}" ${selected.has(d.id) ? 'checked' : ''} ${d.supported ? '' : 'disabled'} aria-label="Selecteer ${esc(d.name)}"></td>
       <td><div class="dev-name">${esc(sameAsIp ? shortModel(d.model) : d.name)}</div>
-          <div class="dev-sub">${esc(sameAsIp ? d.ip : `${shortModel(d.model)} · ${d.ip}`)}</div></td>
+          <div class="dev-sub">${esc(sameAsIp ? d.ip : `${shortModel(d.model)} · ${d.ip}`)}</div>
+          ${d.identityMismatch ? `<div class="dev-sub" style="color:var(--bad);font-weight:600" title="${esc(d.reason)}">⚠ ander apparaat op dit IP: ${esc(shortModel(d.identityMismatch.model) || '?')}</div>` : ''}</td>
       <td>${esc(d.group)}</td>
       <td><span class="pill p-${esc(d.power)}" title="${esc(info.profile.powerStates[d.power] || 'Status nog niet uitgelezen')}">${esc(POWER_LABEL[d.power] || d.power)}</span>
         ${d.coldStart ? `<div class="dev-sub" title="${esc(info.profile.coldStartInfo[d.coldStart] || '')}">na stroomuitval: ${esc(d.coldStart)}</div>` : ''}</td>

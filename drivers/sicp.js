@@ -93,12 +93,31 @@ async function read(dev, profile, cfg, name) {
   } catch { return false; }
 }
 
+// Leest serienummer (0x15) en model (0xA1 0x00) van het apparaat dat op dit IP antwoordt.
+// Bij DHCP kan Control een oud IP hebben, waarop nu een ander scherm zit.
+async function readIdentity(dev, cfg) {
+  const asText = (d) => Buffer.from(d.slice(1)).toString('latin1').replace(/\0/g, '').trim();
+  const s = await send(dev, cfg, [0x15]).catch(() => null);
+  const m = await send(dev, cfg, [0xA1, 0x00]).catch(() => null);
+  return {
+    serial: s && s[0] === 0x15 ? asText(s) : null,
+    model: m && m[0] === 0xA1 ? asText(m) : null,
+  };
+}
+
 async function refreshAll(dev, profile, cfg) {
   // Power eerst en verplicht: geen antwoord = scherm onbereikbaar.
   const c = command(profile, cfg, 'powerGet');
   const d = await send(dev, cfg, [hex(c.code)]);
   if (d[0] === hex(c.code)) READERS.powerGet(dev, d.slice(1), profile);
   dev.lastSeen = new Date().toISOString();
+  // Klopt het apparaat op dit IP met wat Control verwacht?
+  const id = await readIdentity(dev, cfg);
+  const norm = (v) => String(v || '').replace(/\/\d+$/, '').trim().toUpperCase();
+  const wrongSerial = id.serial && dev.serial && norm(id.serial) !== norm(dev.serial);
+  const wrongModel = id.model && dev.model && norm(id.model) !== norm(dev.model);
+  dev.identityMismatch = wrongSerial || wrongModel ? { model: id.model, serial: id.serial } : null;
+  if (dev.identityMismatch) return; // verder niets uitlezen van een ander apparaat
   for (const name of ['sourceGet', 'smartPowerGet', 'powerSaveGet', 'bootSourceGet', 'coldStartGet']) {
     if (!(await read(dev, profile, cfg, name))) {
       if (name === 'smartPowerGet') dev.smartPower = null;
@@ -180,6 +199,15 @@ async function setAndVerify(dev, profile, cfg, setName, payload, getName, check)
 }
 
 async function execute(dev, type, params, profile, cfg) {
+  // Vóór elke wijzigende actie controleren dat op dit IP echt het verwachte scherm zit.
+  if (type !== 'refresh') {
+    const id = await readIdentity(dev, cfg);
+    const norm = (v) => String(v || '').replace(/\/\d+$/, '').trim().toUpperCase();
+    if ((id.serial && dev.serial && norm(id.serial) !== norm(dev.serial)) || (id.model && dev.model && norm(id.model) !== norm(dev.model))) {
+      dev.identityMismatch = { model: id.model, serial: id.serial };
+      return { ok: false, error: `Niet uitgevoerd: op ${dev.ip} antwoordt ${id.model || '?'} (serienr ${id.serial || '?'}), niet ${dev.model}. Werk het IP-adres bij in Control.` };
+    }
+  }
   switch (type) {
     case 'refresh': {
       await refreshAll(dev, profile, cfg);
