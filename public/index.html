@@ -91,7 +91,9 @@
 
       <div class="tab hidden" data-panel="firmware">
         <p class="note warn">Een firmware-upgrade duurt per scherm 10–30 minuten en het scherm herstart. Onderbreek de stroom niet. De tool doet standaard één scherm tegelijk.</p>
-        <div id="fwInfo" class="muted small"></div>
+        <div class="fw-head"><strong>Firmware per serie</strong><button id="fwReload" class="ghost" title="One_Link opnieuw inlezen">Vernieuwen</button></div>
+        <div id="fwInfo" class="fw-list"></div>
+        <label class="switch"><input id="fwShared" type="checkbox"><span>Ik heb gecontroleerd dat de firmware bij het model hoort (nodig bij een gedeelde link)</span></label>
         <label class="field">Typ UPGRADE om te bevestigen <input id="fwConfirm" type="search" autocomplete="off" placeholder="UPGRADE"></label>
       </div>
 

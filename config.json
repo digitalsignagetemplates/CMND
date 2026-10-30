@@ -24,6 +24,7 @@
   },
   "devicesFile": "devices.json",
   "firmwareDir": "firmware",
+  "onelinkFile": "",
   "firmwareConcurrency": 1,
   "firmwareWaitMinutes": 25,
   "displayFtp": {

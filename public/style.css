@@ -105,6 +105,16 @@ button.icon:hover { border-color: var(--accent); color: var(--accent); }
 .schedrow input[type=time] { height: 30px; }
 .schedrow select { height: 30px; flex: 1; }
 
+/* firmware */
+.fw-head { display: flex; justify-content: space-between; align-items: center; }
+.fw-list { display: grid; gap: 8px; }
+.fw-card { border: 1px solid var(--line); border-radius: 4px; padding: 10px; display: grid; gap: 4px; font-size: 13px; }
+.fw-card .row { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fw-card progress { width: 100%; height: 8px; }
+.fw-card .warn-text { color: var(--wait); }
+.fw-card .bad-text { color: var(--bad); }
+.fw-card .ok-text { color: var(--ok); }
+
 /* table */
 .tablewrap { overflow-x: auto; margin: 0 -18px; padding: 0 18px; }
 table { width: 100%; border-collapse: collapse; }

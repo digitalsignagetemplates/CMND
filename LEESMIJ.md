@@ -47,8 +47,11 @@ Bron voor alle codes: *The SICP Commands Document V2.13* van PPDS.
 | Firmware-upgrade | FTP-upload `update.zip` + 0x20 | gedocumenteerd (§11.13), **nog niet op een scherm getest** |
 
 ### Firmware-upgrade
-1. Download de firmware (`update.zip`) per serie bij PPDS, bijvoorbeeld via het One_Link-overzicht.
-2. Zet hem in `firmware\<serie>\update.zip` en de versie in `firmware\<serie>\version.txt` (zoals het scherm hem meldt, bv. `1.028`). `<serie>` is bijvoorbeeld `4650D` of `5050D`.
+1. Zet het PPDS-overzicht `One_Link.xlsm` in je map Downloads, of zet het pad in `onelinkFile` in `config.json`. De tool leest daaruit per serie de nieuwste firmware en de downloadlink. Gebruik **Vernieuwen** na een nieuwe versie van One_Link.
+2. Open in de tool het tabblad **Firmware** en klik bij de serie op **Ophalen**. De tool downloadt `update.zip` naar `firmware\<serie>\` en zet `version.txt` en `source.json` klaar. Na het downloaden toont hij voor welk apparaat het bestand volgens de update zelf bedoeld is.
+   - De knop verschijnt alleen als One_Link een versie in SICP-notatie geeft (bijvoorbeeld V1.028). Alleen dan kan de tool na de upgrade controleren of die gelukt is.
+   - Staat dezelfde link in One_Link ook bij andere series, dan waarschuwt de tool. Je moet dan bevestigen dat de firmware bij het model hoort.
+   - Handmatig kan ook: zet `update.zip` in `firmware\<serie>\` en de versie in `firmware\<serie>\version.txt`. Gebruik de notatie die het scherm meldt, bijvoorbeeld `1.028`.
 3. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
 4. **Voortest (start geen upgrade):** `node tools\test-firmware.js <ip>`. Het script controleert:
    - de firmwareversie via SICP, en welke notatie je in `version.txt` moet gebruiken;
