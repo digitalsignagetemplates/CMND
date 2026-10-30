@@ -118,7 +118,9 @@ async function readFirmware(dev, profile, cfg) {
   return Buffer.from(d.slice(1)).toString('latin1').replace(/\0/g, '').trim() || null;
 }
 
-const sameVersion = (a, b) => String(a || '').replace(/^v/i, '').trim() === String(b || '').replace(/^v/i, '').trim();
+// Versies vergelijkbaar maken: 'V1.028' -> '1.028', 'FB02.12' -> '02.12' (zo meldt o.a. de Q-Line het via SICP).
+const normVersion = (v) => String(v || '').trim().replace(/^v/i, '').replace(/^FB/i, '');
+const sameVersion = (a, b) => normVersion(a) === normVersion(b);
 
 // Schema-pagina volgens SICP 2.13 §10.1.3:
 // [pagina<<4 | aan, start-uur, start-min, eind-uur, eind-min, bron, dagen, tag]
@@ -264,7 +266,7 @@ async function execute(dev, type, params, profile, cfg) {
       if (!before) return { ok: false, error: 'Firmwareversie niet uitleesbaar via SICP (0xA1); upgrade niet gestart omdat het resultaat niet te controleren is' };
       if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
       // version.txt moet dezelfde notatie hebben als het scherm meldt (bv. 1.028, niet FB01.19).
-      if (/^\d+\.\d+/.test(before) !== /^\d+\.\d+/.test(String(fw.version).replace(/^v/i, ''))) {
+      if (/^\d+\.\d+/.test(normVersion(before)) !== /^\d+\.\d+/.test(normVersion(fw.version))) {
         return { ok: false, error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
       }
       if (dev.power !== 'aan') return { ok: false, error: 'Scherm moet aan staan voor een firmware-upgrade' };

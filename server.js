@@ -199,7 +199,8 @@ async function downloadFirmware(series) {
     if (st.total && st.received !== st.total) throw new Error('Download onvolledig');
     const ota = (() => { try { return onelink.otaInfo(part); } catch { return null; } })();
     fs.renameSync(part, path.join(dir, 'update.zip'));
-    fs.writeFileSync(path.join(dir, 'version.txt'), info.version || info.androidFw || '');
+    // Alleen een Android-versie (FB02.12)? Dan zonder 'FB', zoals het scherm hem via SICP meldt.
+    fs.writeFileSync(path.join(dir, 'version.txt'), info.version || String(info.androidFw || '').replace(/^FB/i, ''));
     fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ androidFw: info.androidFw, url: info.url, downloadedAt: new Date().toISOString(), ota }, null, 2));
     st.state = 'klaar';
   } catch (e) {
@@ -211,10 +212,14 @@ async function downloadFirmware(series) {
 
 // Controle: het apparaat in de OTA-metadata (bv. "BDL3650Q") moet bij de serie passen.
 // Zonder metadata kan het niet automatisch; dan geldt de handmatige bevestiging.
+// Sommige firmware noemt een interne codenaam (bv. "sugarcane"); die kan per serie worden
+// toegestaan in config (otaAliases), maar alleen nadat PPDS heeft bevestigd dat ze bij elkaar horen.
 function otaMismatch(series, ready) {
   const dev = ready && ready.ota && ready.ota.device;
   if (!dev) return null;
-  return dev.toUpperCase().includes(series.toUpperCase()) ? null : dev;
+  if (dev.toUpperCase().includes(series.toUpperCase())) return null;
+  const aliases = ((cfg.otaAliases || {})[series.toUpperCase()] || []).map((a) => String(a).toUpperCase());
+  return aliases.includes(dev.toUpperCase()) ? null : dev;
 }
 
 function firmwareOverview() {
@@ -229,8 +234,9 @@ function firmwareOverview() {
       latest: l && { version: l.version, androidFw: l.androidFw, sharedWith: l.sharedWith, models: l.models },
       ready: ready[s] ? { version: ready[s].version, size: ready[s].size, ota: ready[s].ota || null, downloadedAt: ready[s].downloadedAt || null, mismatch: otaMismatch(s, ready[s]) } : null,
       download: downloads[s] || null,
-      // Automatisch upgraden alleen met een versie in SICP-notatie (achteraf te controleren).
-      upgradable: !!(l && l.version),
+      // Upgraden kan met een SICP-versie (V1.028) of Android-versie (FB02.12); of het scherm zijn
+      // versie ook echt via SICP meldt, controleert de upgrade zelf vooraf.
+      upgradable: !!(l && (l.version || l.androidFw)),
     };
   }
   return out;

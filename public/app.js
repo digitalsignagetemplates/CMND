@@ -92,12 +92,13 @@ async function renderFirmware() {
       if (!l) lines.push('<span class="muted">Niet gevonden in One_Link</span>');
       else {
         lines.push(`<span>Nieuwste: <strong>${esc(l.version || l.androidFw || '?')}</strong>${l.version && l.androidFw ? ` <span class="muted">(${esc(l.androidFw)})</span>` : ''}</span>`);
-        if (!v.upgradable) lines.push('<span class="warn-text">Geen versie in SICP-notatie: upgrade via de tool niet te controleren. Handmatig bijwerken (USB/CMND).</span>');
+        if (!v.upgradable) lines.push('<span class="warn-text">Geen versie bekend in One_Link: handmatig bijwerken (USB/CMND).</span>');
+        else if (!l.version) lines.push('<span class="muted">Alleen Android-versie bekend; werkt alleen op schermen die hun versie via SICP melden (de tool controleert dit vooraf).</span>');
         if (l.sharedWith && l.sharedWith.length) lines.push(`<span class="warn-text">Let op: dezelfde downloadlink staat in One_Link ook bij ${esc(l.sharedWith.join(', '))}. Controleer of dit de juiste firmware is.</span>`);
       }
       if (v.ready) {
         lines.push(`<span class="ok-text">Klaargezet: ${esc(v.ready.version)} (${mb(v.ready.size)})</span>`);
-        if (v.ready.mismatch) lines.push(`<span class="bad-text"><strong>Verkeerde firmware:</strong> het bestand is bedoeld voor ${esc(v.ready.mismatch)}, niet voor ${esc(s)}. Upgrade is geblokkeerd. Vraag de juiste firmware op bij PPDS.</span>`);
+        if (v.ready.mismatch) lines.push(`<span class="bad-text"><strong>Niet bevestigd:</strong> het bestand is volgens zichzelf voor "${esc(v.ready.mismatch)}", niet herkenbaar als ${esc(s)}. Upgrade is geblokkeerd. Laat PPDS bevestigen dat dit de juiste firmware is (dan: otaAliases in config.json) of vraag de juiste firmware op.</span>`);
         else if (v.ready.ota && (v.ready.ota.device || v.ready.ota.build)) lines.push(`<span class="muted">Volgens het bestand bedoeld voor: ${esc(v.ready.ota.device || '?')}${v.ready.ota.build ? ` · ${esc(v.ready.ota.build)}` : ''}</span>`);
         else lines.push('<span class="warn-text">Het bestand zegt niet voor welk apparaat het is; controleer dit zelf.</span>');
       }
@@ -105,7 +106,8 @@ async function renderFirmware() {
         lines.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted">Downloaden… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);
       } else if (dl && dl.state === 'mislukt') lines.push(`<span class="bad-text">Download mislukt: ${esc(dl.error)}</span>`);
       if (l && v.upgradable && !(dl && dl.state === 'bezig')) {
-        const label = v.ready && v.ready.version === (l.version || l.androidFw) ? 'Opnieuw ophalen' : 'Ophalen';
+        const want = String(l.version || l.androidFw || '').replace(/^FB/i, '');
+        const label = v.ready && v.ready.version === want ? 'Opnieuw ophalen' : 'Ophalen';
         lines.push(`<div class="row"><span></span><button class="ghost" data-fetch="${esc(s)}">${label}</button></div>`);
       }
       return `<div class="fw-card">${lines.join('')}</div>`;

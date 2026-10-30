@@ -51,6 +51,7 @@ Bron voor alle codes: *The SICP Commands Document V2.13* van PPDS.
 2. Open in de tool het tabblad **Firmware** en klik bij de serie op **Ophalen**. De tool downloadt `update.zip` naar `firmware\<serie>\` en zet `version.txt` en `source.json` klaar. Na het downloaden toont hij voor welk apparaat het bestand volgens de update zelf bedoeld is.
    - De knop verschijnt alleen als One_Link een versie in SICP-notatie geeft (bijvoorbeeld V1.028). Alleen dan kan de tool na de upgrade controleren of die gelukt is.
    - Staat dezelfde link in One_Link ook bij andere series, dan waarschuwt de tool. Je moet dan bevestigen dat de firmware bij het model hoort.
+   - Noemt het bestand een interne codenaam in plaats van het model (bijvoorbeeld de 3550Q-firmware: "sugarcane"), dan blokkeert de tool de upgrade. Laat PPDS bevestigen dat de codenaam bij de serie hoort en zet hem daarna in `config.json`: `"otaAliases": { "3550Q": ["sugarcane"] }`.
    - Handmatig kan ook: zet `update.zip` in `firmware\<serie>\` en de versie in `firmware\<serie>\version.txt`. Gebruik de notatie die het scherm meldt, bijvoorbeeld `1.028`.
 3. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
 4. **Voortest (start geen upgrade):** `node tools\test-firmware.js <ip>`. Het script controleert:

@@ -25,6 +25,7 @@
   "devicesFile": "devices.json",
   "firmwareDir": "firmware",
   "onelinkFile": "",
+  "otaAliases": {},
   "firmwareConcurrency": 1,
   "firmwareWaitMinutes": 25,
   "displayFtp": {
