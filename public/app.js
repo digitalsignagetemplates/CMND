@@ -97,7 +97,9 @@ async function renderFirmware() {
       }
       if (v.ready) {
         lines.push(`<span class="ok-text">Klaargezet: ${esc(v.ready.version)} (${mb(v.ready.size)})</span>`);
-        if (v.ready.ota && (v.ready.ota.device || v.ready.ota.build)) lines.push(`<span class="muted">Volgens het bestand bedoeld voor: ${esc(v.ready.ota.device || '?')}${v.ready.ota.build ? ` · ${esc(v.ready.ota.build)}` : ''}</span>`);
+        if (v.ready.mismatch) lines.push(`<span class="bad-text"><strong>Verkeerde firmware:</strong> het bestand is bedoeld voor ${esc(v.ready.mismatch)}, niet voor ${esc(s)}. Upgrade is geblokkeerd. Vraag de juiste firmware op bij PPDS.</span>`);
+        else if (v.ready.ota && (v.ready.ota.device || v.ready.ota.build)) lines.push(`<span class="muted">Volgens het bestand bedoeld voor: ${esc(v.ready.ota.device || '?')}${v.ready.ota.build ? ` · ${esc(v.ready.ota.build)}` : ''}</span>`);
+        else lines.push('<span class="warn-text">Het bestand zegt niet voor welk apparaat het is; controleer dit zelf.</span>');
       }
       if (dl && dl.state === 'bezig') {
         lines.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted">Downloaden… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);

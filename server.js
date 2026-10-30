@@ -199,6 +199,14 @@ async function downloadFirmware(series) {
   }
 }
 
+// Controle: het apparaat in de OTA-metadata (bv. "BDL3650Q") moet bij de serie passen.
+// Zonder metadata kan het niet automatisch; dan geldt de handmatige bevestiging.
+function otaMismatch(series, ready) {
+  const dev = ready && ready.ota && ready.ota.device;
+  if (!dev) return null;
+  return dev.toUpperCase().includes(series.toUpperCase()) ? null : dev;
+}
+
 function firmwareOverview() {
   const ready = firmwareCatalog();
   const used = new Set(devices.map((d) => seriesOf(d.model)).filter(Boolean));
@@ -209,7 +217,7 @@ function firmwareOverview() {
     out[s] = {
       inUse: devices.filter((d) => seriesOf(d.model) === s).length,
       latest: l && { version: l.version, androidFw: l.androidFw, sharedWith: l.sharedWith, models: l.models },
-      ready: ready[s] ? { version: ready[s].version, size: ready[s].size, ota: ready[s].ota || null, downloadedAt: ready[s].downloadedAt || null } : null,
+      ready: ready[s] ? { version: ready[s].version, size: ready[s].size, ota: ready[s].ota || null, downloadedAt: ready[s].downloadedAt || null, mismatch: otaMismatch(s, ready[s]) } : null,
       download: downloads[s] || null,
       // Automatisch upgraden alleen met een versie in SICP-notatie (achteraf te controleren).
       upgradable: !!(l && l.version),
@@ -320,6 +328,9 @@ function createAction(body, user) {
     const s = supportInfo(dev);
     if (!s.supported) skipped.push({ deviceId: id, reason: s.reason });
     else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
+    else if (type === 'firmware' && otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])) {
+      skipped.push({ deviceId: id, reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
+    }
     else if (type === 'firmware' && actions.some((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((x) => x.deviceId === id))) {
       skipped.push({ deviceId: id, reason: 'Er loopt al een firmware-upgrade op dit scherm' });
     }
