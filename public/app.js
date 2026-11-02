@@ -4,7 +4,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 
 const DAYS = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
 const POWER_LABEL = { aan: 'Aan', backlight_uit: 'Backlight uit', slaapt: 'Slaapt', uit: 'Uit', onbekend: 'Onbekend' };
-const STATUS_LABEL = { wachtrij: 'wachtrij', verstuurd: 'verstuurd', bevestigd: 'bevestigd', mislukt: 'mislukt', geen_reactie: 'geen reactie', niet_getest: 'niet verstuurd (niet getest)' };
+const STATUS_LABEL = { wachtrij: 'wachtrij', verstuurd: 'bezig', bevestigd: 'bevestigd', mislukt: 'mislukt', geen_reactie: 'geen reactie', niet_getest: 'niet verstuurd (niet getest)', overgeslagen: 'overgeslagen' };
 const TYPE_LABEL = { power: 'Aan/uit', powerSave: 'Power save', source: 'Bron wisselen', bootSource: 'Opstartbron', schedule: 'Powerschema', refresh: 'Status uitlezen', screenshot: 'Screenshot maken', firmware: 'Firmware-upgrade' };
 
 let info;
@@ -305,17 +305,87 @@ function paramsText(a) {
   return '';
 }
 
+// ---------- foutterugkoppeling ----------
+
+const PHASES = [['voorcontrole', 'Voorcontrole'], ['upload', 'Upload'], ['starten', 'Upgrade starten'], ['herstart', 'Herstart + controle'], ['klaar', 'Klaar']];
+const errInfo = (code) => (info.errors && info.errors[code]) || (code ? { title: code, cause: '', fix: '' } : null);
+
+// Fasebalk voor een firmware-upgrade: waar staat of stopte dit scherm?
+function phaseBar(t) {
+  if (!t.phase) return '';
+  const idx = PHASES.findIndex(([k]) => k === t.phase);
+  const failed = ['mislukt', 'geen_reactie'].includes(t.status);
+  return `<div class="phases">${PHASES.map(([k, l], i) => {
+    let cls = i < idx ? 'done' : i === idx ? (failed ? 'fail' : t.status === 'bevestigd' ? 'done' : 'now') : '';
+    if (k === 'klaar' && t.status === 'bevestigd') cls = 'done';
+    return `<span class="ph ${cls}">${esc(l)}</span>`;
+  }).join('<span class="ph-sep">›</span>')}</div>`;
+}
+
+// Fouten en overgeslagen schermen gegroepeerd per probleem, met wat je eraan doet.
+function problemsBlock(a) {
+  const groups = {};
+  for (const t of a.targets) {
+    if (!['mislukt', 'geen_reactie', 'niet_getest'].includes(t.status)) continue;
+    const code = t.code || 'UNKNOWN';
+    (groups[code] = groups[code] || []).push(t.name);
+  }
+  for (const s of a.skipped || []) {
+    const code = s.code || 'UNKNOWN';
+    (groups[code] = groups[code] || []).push(`${s.name || s.deviceId} (overgeslagen)`);
+  }
+  const entries = Object.entries(groups).sort((x, y) => y[1].length - x[1].length);
+  if (!entries.length) return '';
+  return `<div class="problems">${entries.map(([code, names]) => {
+    const e = errInfo(code);
+    return `<div class="problem">
+      <div class="problem-head"><strong>${names.length}× ${esc(e.title)}</strong> <span class="muted small">${esc(code)}</span></div>
+      ${e.cause ? `<div class="small">${esc(e.cause)}</div>` : ''}
+      ${e.fix ? `<div class="small fix"><strong>Wat te doen:</strong> ${esc(e.fix)}</div>` : ''}
+      <div class="small muted">Schermen: ${esc(names.join(', '))}</div>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function showTarget(actionId, deviceId) {
+  const a = actions.find((x) => x.id === actionId);
+  const t = a && a.targets.find((x) => x.deviceId === deviceId);
+  if (!t) return;
+  const d = devices.find((x) => x.id === deviceId) || {};
+  const e = t.code ? errInfo(t.code) : null;
+  const ok = t.status === 'bevestigd';
+  $('#detailTitle').textContent = `${t.name} · ${TYPE_LABEL[a.type]}`;
+  $('#detailBody').innerHTML = `
+    <p><span class="st st-${esc(t.status)}">${esc(STATUS_LABEL[t.status] || t.status)}</span> ${d.model ? `<span class="muted">${esc(shortModel(d.model))} · ${esc(d.ip)}</span>` : ''}</p>
+    ${phaseBar(t)}
+    ${e && !ok ? `<div class="problem"><div class="problem-head"><strong>${esc(e.title)}</strong> <span class="muted small">${esc(t.code)}</span></div>
+      ${e.cause ? `<div class="small">${esc(e.cause)}</div>` : ''}
+      ${e.fix ? `<div class="small fix"><strong>Wat te doen:</strong> ${esc(e.fix)}</div>` : ''}</div>` : ''}
+    <table class="kv">
+      <tr><th>Melding</th><td>${esc(t.detail || '–')}</td></tr>
+      ${t.phase ? `<tr><th>Fase</th><td>${esc((PHASES.find(([k]) => k === t.phase) || [, t.phase])[1])}</td></tr>` : ''}
+      <tr><th>Verstuurd</th><td>${t.sentAt ? new Date(t.sentAt).toLocaleString('nl-NL') : '–'}</td></tr>
+      <tr><th>Klaar</th><td>${t.doneAt ? new Date(t.doneAt).toLocaleString('nl-NL') : 'bezig…'}</td></tr>
+    </table>`;
+  $('#detail').showModal();
+}
+
 async function loadActions() {
   actions = await api('/api/actions');
   $('#actions').innerHTML = actions.map((a) => {
     const counts = {};
     for (const t of a.targets) counts[t.status] = (counts[t.status] || 0) + 1;
+    if ((a.skipped || []).length) counts.overgeslagen = a.skipped.length;
+    const running = a.targets.filter((t) => t.phase && !t.doneAt);
     return `<div class="action">
       <div class="action-head">
         <div><span class="action-title">${esc(TYPE_LABEL[a.type])}</span> <span class="muted">· ${esc(paramsText(a))}</span></div>
-        <div class="counts">${Object.entries(counts).map(([s, n]) => `<span class="st st-${s}">${n} ${STATUS_LABEL[s]}</span>`).join('')}</div>
+        <div class="counts">${Object.entries(counts).map(([s, n]) => `<span class="st st-${s}">${n} ${STATUS_LABEL[s] || s}</span>`).join('')}
+          <a class="icon" href="/api/actions/${encodeURIComponent(a.id)}/csv" title="Resultaat per scherm als CSV (Excel)">CSV</a></div>
       </div>
-      <div class="targets">${a.targets.map((t) => `<span class="st st-${t.status}" title="${esc(STATUS_LABEL[t.status])}${t.detail ? ': ' + esc(t.detail) : ''}">${esc(t.name)}</span>`).join('')}</div>
+      ${running.map((t) => `<div class="running"><strong>${esc(t.name)}</strong> <span class="muted small">${esc(t.detail || '')}</span>${phaseBar(t)}</div>`).join('')}
+      ${problemsBlock(a)}
+      <div class="targets">${a.targets.map((t) => `<button class="st st-${esc(t.status)} chip-btn" data-action="${esc(a.id)}" data-dev="${esc(t.deviceId)}" title="Klik voor details">${esc(t.name)}${t.code && t.status !== 'bevestigd' ? ' ⓘ' : ''}</button>`).join('')}</div>
       <div class="muted small">${new Date(a.createdAt).toLocaleString('nl-NL')} · ${esc(a.user)}${a.finishedAt ? '' : ' · bezig…'}</div>
     </div>`;
   }).join('') || '<p class="muted">Nog geen acties uitgevoerd.</p>';
@@ -377,6 +447,11 @@ async function init() {
   };
   $('#devices').addEventListener('click', (e) => { if (e.target.dataset.shot) showShot(e.target.dataset.shot); });
   $('#shotClose').onclick = () => $('#shot').close();
+  $('#detailClose').onclick = () => $('#detail').close();
+  $('#actions').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-action]');
+    if (b) showTarget(b.dataset.action, b.dataset.dev);
+  });
   $$('.segmented button').forEach((b) => b.onclick = async () => {
     tab = b.dataset.tab;
     if (tab === 'firmware') refreshFirmware();

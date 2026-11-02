@@ -50,9 +50,9 @@ function send(dev, cfg, data) {
 
 function ackResult(data) {
   if (data[0] === 0x00 && data[1] === 0x06) return { ok: true };
-  if (data[0] === 0x00 && data[1] === 0x15) return { ok: false, error: 'NACK (commando geweigerd)' };
-  if (data[0] === 0x00 && data[1] === 0x18) return { ok: false, error: 'NAV (niet beschikbaar op dit model)' };
-  return { ok: false, error: `onverwacht antwoord ${data.map((b) => b.toString(16)).join(' ')}` };
+  if (data[0] === 0x00 && data[1] === 0x15) return { ok: false, code: 'NACK', error: 'NACK (commando geweigerd)' };
+  if (data[0] === 0x00 && data[1] === 0x18) return { ok: false, code: 'NAV', error: 'NAV (niet beschikbaar op dit model)' };
+  return { ok: false, code: 'UNKNOWN', error: `onverwacht antwoord ${data.map((b) => b.toString(16)).join(' ')}` };
 }
 
 function command(profile, cfg, name) {
@@ -199,7 +199,7 @@ async function writePages(dev, profile, cfg, pages) {
   const set = command(profile, cfg, 'scheduleSet');
   for (let i = 0; i < pages.length; i++) {
     res = ackResult(await send(dev, cfg, [hex(set.code), ...pages[i]]));
-    if (!res.ok) return { ok: false, error: `pagina ${i + 1}: ${res.error}` };
+    if (!res.ok) return { ok: false, code: res.code, error: `pagina ${i + 1}: ${res.error}` };
   }
   return { ok: true };
 }
@@ -210,8 +210,8 @@ async function setAndVerify(dev, profile, cfg, setName, payload, getName, check)
   const res = ackResult(await send(dev, cfg, [hex(c.code), ...payload]));
   if (!res.ok) return res;
   await sleep(800);
-  if (!(await read(dev, profile, cfg, getName))) return { ok: false, noReply: true, error: 'ACK ontvangen, maar teruglezen gaf geen antwoord' };
-  return check() ? { ok: true, detail: 'teruggelezen en gelijk' } : { ok: false, error: 'ACK ontvangen, maar teruggelezen waarde wijkt af' };
+  if (!(await read(dev, profile, cfg, getName))) return { ok: false, noReply: true, code: 'NO_REPLY', error: 'ACK ontvangen, maar teruglezen gaf geen antwoord' };
+  return check() ? { ok: true, detail: 'teruggelezen en gelijk' } : { ok: false, code: 'VERIFY_FAILED', error: 'ACK ontvangen, maar teruggelezen waarde wijkt af' };
 }
 
 async function execute(dev, type, params, profile, cfg) {
@@ -221,7 +221,7 @@ async function execute(dev, type, params, profile, cfg) {
     const norm = (v) => String(v || '').replace(/\/\d+$/, '').trim().toUpperCase();
     if ((id.serial && dev.serial && norm(id.serial) !== norm(dev.serial)) || (id.model && dev.model && norm(id.model) !== norm(dev.model))) {
       dev.identityMismatch = { model: id.model, serial: id.serial };
-      return { ok: false, error: `Niet uitgevoerd: op ${dev.ip} antwoordt ${id.model || '?'} (serienr ${id.serial || '?'}), niet ${dev.model}. Werk het IP-adres bij in Control.` };
+      return { ok: false, code: 'IDENTITY_MISMATCH', error: `Niet uitgevoerd: op ${dev.ip} antwoordt ${id.model || '?'} (serienr ${id.serial || '?'}), niet ${dev.model}. Werk het IP-adres bij in Control.` };
     }
   }
   switch (type) {
@@ -252,8 +252,8 @@ async function execute(dev, type, params, profile, cfg) {
         if (dev.currentSource === params.source) return { ok: true, detail: 'gewisseld en teruggelezen' };
       }
       return answered
-        ? { ok: false, error: `ACK ontvangen, maar scherm meldt bron ${dev.currentSource}` }
-        : { ok: false, noReply: true, error: 'ACK ontvangen, maar teruglezen gaf geen antwoord' };
+        ? { ok: false, code: 'VERIFY_FAILED', error: `ACK ontvangen, maar scherm meldt bron ${dev.currentSource}` }
+        : { ok: false, noReply: true, code: 'NO_REPLY', error: 'ACK ontvangen, maar teruglezen gaf geen antwoord' };
     }
     case 'bootSource': {
       const src = profile.sources.find((s) => s.id === params.source);
@@ -272,30 +272,30 @@ async function execute(dev, type, params, profile, cfg) {
       }
       // Bij uitzetten in power-save Mode 1/2 valt het netwerk weg; dat is dan verwacht gedrag.
       const hint = params.state === 'off' && ['1', '2'].includes(dev.powerSaveMode) ? ' (verwacht in power-save Mode 1/2: netwerk uit in standby)' : '';
-      return { ok: false, noReply: true, error: `ACK ontvangen, maar status niet bevestigd${hint}` };
+      return { ok: false, noReply: true, code: 'NO_REPLY', error: `ACK ontvangen, maar status niet bevestigd${hint}` };
     }
     case 'schedule': {
       // SICP 2.13 §10.1: 7 pagina's. Eerst het huidige schema bewaren, dan resetten en
       // per regel een pagina zetten. Gaat dat mis, dan wordt het oude schema teruggezet.
       const old = await readSchedule(dev, profile, cfg);
-      if (old.some((p) => p === null)) return { ok: false, error: 'Huidig schema kon niet volledig worden uitgelezen; niets gewijzigd' };
+      if (old.some((p) => p === null)) return { ok: false, code: 'NO_REPLY', error: 'Huidig schema kon niet volledig worden uitgelezen; niets gewijzigd' };
       const pages = params.entries.slice(0, 7).map((e, i) => schedulePayload(profile, i + 1, e));
       const res = await writePages(dev, profile, cfg, pages);
       if (!res.ok) {
         const back = await writePages(dev, profile, cfg, old.map((p) => p.raw)).catch((e) => ({ ok: false, error: e.message }));
-        return { ok: false, error: `${res.error}; oud schema ${back.ok ? 'teruggezet' : `NIET teruggezet (${back.error})`}` };
+        return { ok: false, code: res.code || 'UNKNOWN', error: `${res.error}; oud schema ${back.ok ? 'teruggezet' : `NIET teruggezet (${back.error})`}` };
       }
       await sleep(500);
       const now = await readSchedule(dev, profile, cfg);
       dev.schedule = now;
       // Vergelijk tijden, bron en dagen; de tag laat het scherm soms op 0 staan.
       const same = pages.every((p, i) => now[i] && now[i].enabled && now[i].raw.slice(1, 7).join(',') === p.slice(1, 7).join(','));
-      return same ? { ok: true, detail: `${pages.length} pagina('s) gezet en teruggelezen` } : { ok: false, error: 'ACK ontvangen, maar teruggelezen schema wijkt af' };
+      return same ? { ok: true, detail: `${pages.length} pagina('s) gezet en teruggelezen` } : { ok: false, code: 'VERIFY_FAILED', error: 'ACK ontvangen, maar teruggelezen schema wijkt af' };
     }
     case 'screenshot': {
       const ac = profile.sicp.screenshotAvailable;
       const avail = ac ? await send(dev, cfg, [hex(ac.code)]).catch(() => null) : null;
-      if (avail && avail[0] === hex(ac.code) && avail[1] === 0x00) return { ok: false, error: 'Scherm meldt: screenshot nu niet mogelijk (bron niet vast te leggen)' };
+      if (avail && avail[0] === hex(ac.code) && avail[1] === 0x00) return { ok: false, code: 'NAV', error: 'Scherm meldt: screenshot nu niet mogelijk (bron niet vast te leggen)' };
       const c = command(profile, cfg, 'screenshotSend');
       const r = ackResult(await send(dev, cfg, [hex(c.code)]));
       return r.ok ? { ok: true, detail: 'Screenshot gemaakt; het scherm mailt hem naar het ingestelde e-mailadres' } : r;
@@ -304,56 +304,56 @@ async function execute(dev, type, params, profile, cfg) {
       // SICP 2.13 §11.13: update.zip in de hoofdmap van het scherm, daarna 0x20 0x00.
       // params.file / params.version worden door de server per model ingevuld.
       const fw = params.resolved && params.resolved[dev.id];
-      if (!fw) return { ok: false, error: 'Geen firmwarebestand gevonden voor dit model' };
+      if (!fw) return { ok: false, code: 'FW_NO_FILE', error: 'Geen firmwarebestand gevonden voor dit model' };
       const before = await readFirmware(dev, profile, cfg, 0x03).catch(() => null);
       // Zonder uitleesbare versie is de upgrade achteraf niet te bevestigen: dan niet starten.
-      if (!before) return { ok: false, error: 'Android-firmwareversie niet uitleesbaar via SICP (0xA1 0x03); upgrade niet gestart omdat het resultaat niet te controleren is' };
-      if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
+      if (!before) return { ok: false, code: 'FW_VERSION_UNREADABLE', error: 'Android-firmwareversie niet uitleesbaar via SICP (0xA1 0x03); upgrade niet gestart omdat het resultaat niet te controleren is' };
+      if (sameVersion(before, fw.version)) return { ok: true, code: 'FW_ALREADY_CURRENT', detail: `al actueel (${before})` };
       // PPDS-voorschrift (FW Update SOP): zet het scherm vóór een firmware-update op power save Mode 4.
       if (!(await read(dev, profile, cfg, 'powerSaveGet'))) {
-        return { ok: false, error: 'Power-save-modus niet uitleesbaar; PPDS schrijft Mode 4 voor tijdens een firmware-update. Upgrade niet gestart' };
+        return { ok: false, code: 'NO_REPLY', error: 'Power-save-modus niet uitleesbaar; PPDS schrijft Mode 4 voor tijdens een firmware-update. Upgrade niet gestart' };
       }
       if (dev.powerSaveMode !== '4') {
-        return { ok: false, error: `Scherm staat op power save Mode ${dev.powerSaveMode}; PPDS schrijft Mode 4 voor tijdens een firmware-update. Zet eerst Mode 4 (tabblad Power save) en probeer opnieuw` };
+        return { ok: false, code: 'FW_NOT_MODE4', error: `Scherm staat op power save Mode ${dev.powerSaveMode}; PPDS schrijft Mode 4 voor tijdens een firmware-update. Zet eerst Mode 4 (tabblad Power save) en probeer opnieuw` };
       }
       // Platform van het scherm moet overeenkomen met het platform op de PPDS-pagina.
       if (fw.platform) {
         const live = await readPlatform(dev, cfg).catch(() => null);
-        if (!live) return { ok: false, error: 'Platform van het scherm niet uitleesbaar (0xA2 0x01); upgrade niet gestart' };
-        if (!samePlatform(live, fw.platform)) return { ok: false, error: `Scherm heeft platform ${live}, de firmware is voor ${fw.platform}; upgrade niet gestart` };
+        if (!live) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: 'Platform van het scherm niet uitleesbaar (0xA2 0x01); upgrade niet gestart' };
+        if (!samePlatform(live, fw.platform)) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: `Scherm heeft platform ${live}, de firmware is voor ${fw.platform}; upgrade niet gestart` };
       }
       // version.txt moet dezelfde notatie hebben als het scherm meldt (bv. 1.028, niet FB01.19).
       if (/^\d+\.\d+/.test(normVersion(before)) !== /^\d+\.\d+/.test(normVersion(fw.version))) {
-        return { ok: false, error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
+        return { ok: false, code: 'FW_WRONG_VERSION', error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
       }
-      if (dev.power !== 'aan') return { ok: false, error: 'Scherm moet aan staan voor een firmware-upgrade' };
+      if (dev.power !== 'aan') return { ok: false, code: 'FW_SCREEN_OFF', error: 'Scherm moet aan staan voor een firmware-upgrade' };
       // Lukt de FTP-upload niet, dan wordt de upgrade (0x20) niet gestart.
       // Control bewaart het FTP-wachtwoord versleuteld; daarom heeft config.displayFtp voorrang.
       const login = cfg.displayFtp && cfg.displayFtp.user ? cfg.displayFtp : dev.ftp;
-      if (!login || !login.user || !login.password) return { ok: false, error: 'Geen FTP-gegevens: vul displayFtp in config.json in' };
-      if (login === dev.ftp) return { ok: false, error: 'Vul displayFtp in config.json in: het FTP-wachtwoord in Control is versleuteld en werkt niet' };
+      if (!login || !login.user || !login.password) return { ok: false, code: 'FW_NO_FTP_ACCOUNT', error: 'Geen FTP-gegevens: vul displayFtp in config.local.json in' };
+      if (login === dev.ftp) return { ok: false, code: 'FW_NO_FTP_ACCOUNT', error: 'Vul displayFtp in config.json in: het FTP-wachtwoord in Control is versleuteld en werkt niet' };
       const upgrade = command(profile, cfg, 'firmwareUpgrade');
-      if (params.onStep) params.onStep(dev, `upload ${fw.version} gestart`);
+      if (params.onStep) params.onStep(dev, `upload ${fw.version} gestart`, 'upload');
       await ftp.upload(dev.ip, { port: login.port || 2121, user: login.user, password: login.password }, fw.file, 'update.zip', (sent, size) => {
-        if (params.onStep) params.onStep(dev, `upload ${Math.floor((sent / size) * 100)}%`);
+        if (params.onStep) params.onStep(dev, `upload ${Math.floor((sent / size) * 100)}% (${Math.round(sent / 1048576)} van ${Math.round(size / 1048576)} MB)`, 'upload');
       }, 120000);
-      if (params.onStep) params.onStep(dev, 'upload klaar, upgrade starten');
+      if (params.onStep) params.onStep(dev, 'upload klaar, upgrade starten', 'starten');
       const r = await send(dev, cfg, [hex(upgrade.code), 0x00]);
       const started = (r[0] === hex(upgrade.code) && r[1] === 0x06) || ackResult(r).ok;
-      if (!started) return { ok: false, error: `Upgrade niet gestart: ${ackResult(r).error}` };
+      if (!started) return { ok: false, code: 'FW_NOT_STARTED', error: `Upgrade niet gestart: ${ackResult(r).error}` };
       // Het scherm herstart en is 5+ minuten bezig; daarna de versie teruglezen.
       const deadline = Date.now() + (cfg.firmwareWaitMinutes || 25) * 60000;
       let last = null;
       while (Date.now() < deadline) {
         await sleep(30000);
         last = await readFirmware(dev, profile, cfg, 0x03).catch(() => null) || last;
-        if (params.onStep) params.onStep(dev, last ? `bezig, scherm meldt ${last}` : 'bezig, scherm herstart');
+        if (params.onStep) params.onStep(dev, last ? `bezig, scherm meldt ${last}` : 'bezig, scherm herstart', 'herstart');
         if (sameVersion(last, fw.version)) return { ok: true, detail: `${before} → ${last}` };
       }
-      if (last && !sameVersion(last, before)) return { ok: false, error: `Firmware gewijzigd naar ${last}, maar verwacht ${fw.version}; controleer version.txt` };
+      if (last && !sameVersion(last, before)) return { ok: false, code: 'FW_WRONG_VERSION', error: `Firmware gewijzigd naar ${last}, maar verwacht ${fw.version}; controleer version.txt` };
       return last
-        ? { ok: false, error: `Na upgrade meldt scherm ${last}, verwacht ${fw.version}` }
-        : { ok: false, noReply: true, error: 'Scherm reageert niet meer na de upgrade; controleer het ter plekke' };
+        ? { ok: false, code: 'FW_WRONG_VERSION', error: `Na upgrade meldt scherm ${last}, verwacht ${fw.version}` }
+        : { ok: false, noReply: true, code: 'FW_TIMEOUT', error: 'Scherm reageert niet meer na de upgrade; controleer het ter plekke' };
     }
     default:
       return { ok: false, error: `onbekende actie ${type}` };

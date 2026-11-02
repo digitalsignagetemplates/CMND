@@ -74,6 +74,12 @@ Een scherm heeft twee firmwaredelen:
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 
+## Foutmeldingen
+Elke mislukte of overgeslagen actie krijgt een vaste foutcode, met uitleg in gewone taal: wat er misging, waarom, en wat je eraan doet. De teksten staan in `drivers/errors.js`.
+- **Per actie** staan de problemen gegroepeerd, bijvoorbeeld "12× Geheugen van het scherm vol", met de oplossing en de schermen erbij.
+- **Per scherm:** klik op een scherm in een actie voor de details: foutcode, uitleg, technische melding, tijden en (bij firmware) de fase waarin het misging (voorcontrole → upload → upgrade starten → herstart + controle → klaar).
+- **CSV:** met de knop *CSV* bij een actie download je het resultaat per scherm voor Excel (status, fase, foutcode, probleem, wat te doen, technische melding, tijden).
+
 ## Op een andere pc of op het LAN zetten
 1. Kopieer de hele map en installeer Node.js.
 2. Zet in `config.json` `host` op `0.0.0.0` en vul `auth.user`/`auth.password` in.

@@ -10,6 +10,7 @@ const sicp = require('./drivers/sicp');
 const control = require('./drivers/control');
 const onelink = require('./drivers/onelink'); // alleen nog voor het lezen van OTA-metadata uit update.zip
 const ppdskb = require('./drivers/ppdskb');
+const errors = require('./drivers/errors');
 const https = require('https');
 const os = require('os');
 
@@ -287,6 +288,10 @@ const actions = [];
 try {
   const lines = fs.readFileSync(AUDIT, 'utf8').trim().split('\n').filter(Boolean);
   for (const l of lines.slice(-200)) actions.push(JSON.parse(l));
+  // Oudere acties hebben nog geen foutcode: alsnog afleiden uit de melding.
+  for (const a of actions) {
+    for (const t of a.targets) if (!t.code && ['mislukt', 'geen_reactie'].includes(t.status)) t.code = errors.classify(t.detail);
+  }
 } catch { /* nog geen historie */ }
 
 const ACTION_TYPES = ['power', 'powerSave', 'source', 'bootSource', 'schedule', 'refresh', 'screenshot', 'firmware'];
@@ -325,12 +330,15 @@ async function runTarget(action, t) {
   const dev = byId.get(t.deviceId);
   t.status = 'verstuurd';
   t.sentAt = new Date().toISOString();
+  t.phase = action.type === 'firmware' ? 'voorcontrole' : null;
   if (!dev) {
     t.status = 'mislukt';
+    t.code = 'NOT_IN_CONTROL';
     t.detail = 'Scherm staat niet meer in Control';
     t.doneAt = new Date().toISOString();
     return;
   }
+  let done = false; // na afloop geen late voortgangsmeldingen meer overnemen
   try {
     // Aan/uit wacht op het opstarten; schema en uitlezen doen meerdere commando's. Daarom ruimere time-out.
     // Firmware: upload + herstart + teruglezen, dat duurt al gauw een half uur.
@@ -339,16 +347,41 @@ async function runTarget(action, t) {
     if (action.type === 'firmware') {
       ms = ((cfg.firmwareWaitMinutes || 25) + 30) * 60000;
       const fw = firmwareCatalog()[seriesOf(dev.model)];
-      params = { ...action.params, resolved: fw ? { [dev.id]: fw } : {}, onStep: (d, msg) => { t.detail = msg; } };
+      params = {
+        ...action.params,
+        resolved: fw ? { [dev.id]: fw } : {},
+        onStep: (d, msg, phase) => { if (!done) { t.detail = msg; if (phase) t.phase = phase; } },
+      };
     }
     const res = await withTimeout(driver.execute(dev, action.type, params), ms);
+    done = true;
     t.status = res.ok ? 'bevestigd' : res.noReply ? 'geen_reactie' : 'mislukt';
     t.detail = res.ok ? res.detail || '' : res.error;
+    t.code = res.code || (res.ok ? null : errors.classify(res.error));
   } catch (e) {
+    done = true;
     t.status = e.blocked ? 'niet_getest' : e.timeout ? 'geen_reactie' : 'mislukt';
     t.detail = e.message;
+    t.code = e.blocked ? 'NOT_TESTED' : e.timeout ? (action.type === 'firmware' ? 'FW_TIMEOUT' : 'NO_REPLY') : errors.classify(e.message);
   }
+  if (t.status === 'bevestigd' && action.type === 'firmware' && t.code !== 'FW_ALREADY_CURRENT') t.phase = 'klaar';
   t.doneAt = new Date().toISOString();
+}
+
+// CSV per actie (puntkomma, met BOM zodat Excel de tekens goed toont).
+function actionCsv(a) {
+  const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const head = ['Scherm', 'IP', 'Model', 'Status', 'Fase', 'Foutcode', 'Probleem', 'Wat te doen', 'Technische melding', 'Verstuurd', 'Klaar'];
+  const rows = a.targets.map((t) => {
+    const dev = byId.get(t.deviceId) || {};
+    const e = t.code ? errors.CATALOG[t.code] || {} : {};
+    return [t.name, dev.ip, dev.model, t.status, t.phase || '', t.code || '', e.title || '', e.fix || '', t.detail || '', t.sentAt || '', t.doneAt || ''];
+  });
+  for (const s of a.skipped || []) {
+    const dev = byId.get(s.deviceId) || {};
+    rows.push([dev.name || s.deviceId, dev.ip, dev.model, 'overgeslagen', '', s.code || '', '', '', s.reason, '', '']);
+  }
+  return `﻿${[head, ...rows].map((r) => r.map(q).join(';')).join('\r\n')}`;
 }
 
 async function runAction(action) {
@@ -369,13 +402,13 @@ function createAction(body, user) {
     const dev = byId.get(id);
     if (!dev) continue;
     const s = supportInfo(dev);
-    if (!s.supported) skipped.push({ deviceId: id, reason: s.reason });
-    else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
+    if (!s.supported) skipped.push({ deviceId: id, name: dev.name, code: dev.identityMismatch ? 'IDENTITY_MISMATCH' : 'NAV', reason: s.reason });
+    else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, name: dev.name, code: 'FW_NO_FILE', reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
     else if (type === 'firmware' && otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])) {
-      skipped.push({ deviceId: id, reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
+      skipped.push({ deviceId: id, name: dev.name, code: 'FW_OTA_MISMATCH', reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
     }
     else if (type === 'firmware' && actions.some((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((x) => x.deviceId === id))) {
-      skipped.push({ deviceId: id, reason: 'Er loopt al een firmware-upgrade op dit scherm' });
+      skipped.push({ deviceId: id, name: dev.name, code: 'FW_BUSY', reason: 'Er loopt al een firmware-upgrade op dit scherm' });
     }
     else targets.push({ deviceId: id, name: dev.name, status: 'wachtrij', detail: '' });
   }
@@ -479,7 +512,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/info') {
       return send(res, 200, {
         mode: cfg.mode, minAndroid: cfg.minAndroid, profile, timeoutMs: cfg.timeoutMs,
-        controlError, ftp: await ftpCheck(),
+        controlError, ftp: await ftpCheck(), errors: errors.CATALOG,
       });
     }
     if (req.method === 'GET' && p === '/api/devices') return send(res, 200, devices.map(publicDevice));
@@ -497,6 +530,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 202, { ok: true });
     }
     if (req.method === 'GET' && p === '/api/actions') return send(res, 200, [...actions].reverse().slice(0, 50));
+    const csv = p.match(/^\/api\/actions\/([^/]+)\/csv$/);
+    if (req.method === 'GET' && csv) {
+      const a = actions.find((x) => x.id === csv[1]);
+      if (!a) return send(res, 404, { error: 'Actie niet gevonden' });
+      res.writeHead(200, {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="actie-${a.type}-${a.createdAt.slice(0, 19).replace(/[:T]/g, '-')}.csv"`,
+        'Cache-Control': 'no-store',
+      });
+      return res.end(actionCsv(a));
+    }
     if (req.method === 'POST' && p === '/api/actions') {
       if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });
       const r = createAction(await readBody(req), user);
