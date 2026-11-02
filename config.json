@@ -25,7 +25,9 @@
   "devicesFile": "devices.json",
   "firmwareDir": "firmware",
   "onelinkFile": "",
-  "otaAliases": {},
+  "otaAliases": {
+    "3550Q": ["sugarcane"]
+  },
   "firmwareConcurrency": 1,
   "firmwareWaitMinutes": 25,
   "displayFtp": {
