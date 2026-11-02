@@ -105,12 +105,22 @@ async function readIdentity(dev, cfg) {
   };
 }
 
-async function refreshAll(dev, profile, cfg) {
+// Waarden die zelden veranderen (identiteit, firmware, platform) leest de periodieke poll
+// maar eens per kwartier; acties controleren de identiteit altijd zelf vooraf.
+const SLOW_MS = 15 * 60000;
+
+async function refreshAll(dev, profile, cfg, full = true) {
   // Power eerst en verplicht: geen antwoord = scherm onbereikbaar.
   const c = command(profile, cfg, 'powerGet');
   const d = await send(dev, cfg, [hex(c.code)]);
   if (d[0] === hex(c.code)) READERS.powerGet(dev, d.slice(1), profile);
   dev.lastSeen = new Date().toISOString();
+  const slow = full || !dev.slowReadAt || Date.now() - dev.slowReadAt > SLOW_MS || dev.identityMismatch;
+  if (!slow) {
+    for (const name of ['sourceGet', 'smartPowerGet', 'powerSaveGet', 'bootSourceGet', 'coldStartGet']) await read(dev, profile, cfg, name);
+    return;
+  }
+  dev.slowReadAt = Date.now();
   // Klopt het apparaat op dit IP met wat Control verwacht?
   const id = await readIdentity(dev, cfg);
   const norm = (v) => String(v || '').replace(/\/\d+$/, '').trim().toUpperCase();
@@ -226,7 +236,8 @@ async function execute(dev, type, params, profile, cfg) {
   }
   switch (type) {
     case 'refresh': {
-      await refreshAll(dev, profile, cfg);
+      // Periodieke poll (quick): trage waarden maar eens per kwartier; "Uitlezen" leest alles.
+      await refreshAll(dev, profile, cfg, !params.quick);
       // Het schema (7 pagina's) alleen bij een expliciete 'Uitlezen', niet bij elke periodieke poll.
       if (!params.quick) dev.schedule = await readSchedule(dev, profile, cfg).catch(() => dev.schedule);
       return { ok: true, detail: `power: ${dev.power}` };
@@ -316,12 +327,12 @@ async function execute(dev, type, params, profile, cfg) {
       if (dev.powerSaveMode !== '4') {
         return { ok: false, code: 'FW_NOT_MODE4', error: `Scherm staat op power save Mode ${dev.powerSaveMode}; PPDS schrijft Mode 4 voor tijdens een firmware-update. Zet eerst Mode 4 (tabblad Power save) en probeer opnieuw` };
       }
-      // Platform van het scherm moet overeenkomen met het platform op de PPDS-pagina.
-      if (fw.platform) {
-        const live = await readPlatform(dev, cfg).catch(() => null);
-        if (!live) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: 'Platform van het scherm niet uitleesbaar (0xA2 0x01); upgrade niet gestart' };
-        if (!samePlatform(live, fw.platform)) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: `Scherm heeft platform ${live}, de firmware is voor ${fw.platform}; upgrade niet gestart` };
-      }
+      // Platform van het scherm moet overeenkomen met het platform op de PPDS-pagina. Zonder bekend
+      // platform (bv. handmatig neergezette firmware van een serie buiten de kennisbank) niet starten.
+      if (!fw.platform) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: 'Platform van deze firmware onbekend (serie niet in kb-catalog.json); upgrade niet gestart' };
+      const live = await readPlatform(dev, cfg).catch(() => null);
+      if (!live) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: 'Platform van het scherm niet uitleesbaar (0xA2 0x01); upgrade niet gestart' };
+      if (!samePlatform(live, fw.platform)) return { ok: false, code: 'FW_PLATFORM_MISMATCH', error: `Scherm heeft platform ${live}, de firmware is voor ${fw.platform}; upgrade niet gestart` };
       // version.txt moet dezelfde notatie hebben als het scherm meldt (bv. 1.028, niet FB01.19).
       if (/^\d+\.\d+/.test(normVersion(before)) !== /^\d+\.\d+/.test(normVersion(fw.version))) {
         return { ok: false, code: 'FW_WRONG_VERSION', error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
@@ -334,13 +345,23 @@ async function execute(dev, type, params, profile, cfg) {
       if (login === dev.ftp) return { ok: false, code: 'FW_NO_FTP_ACCOUNT', error: 'Vul displayFtp in config.json in: het FTP-wachtwoord in Control is versleuteld en werkt niet' };
       const upgrade = command(profile, cfg, 'firmwareUpgrade');
       if (params.onStep) params.onStep(dev, `upload ${fw.version} gestart`, 'upload');
-      await ftp.upload(dev.ip, { port: login.port || 2121, user: login.user, password: login.password }, fw.file, 'update.zip', (sent, size) => {
-        if (params.onStep) params.onStep(dev, `upload ${Math.floor((sent / size) * 100)}% (${Math.round(sent / 1048576)} van ${Math.round(size / 1048576)} MB)`, 'upload');
-      }, 120000);
+      const account = { port: login.port || 2121, user: login.user, password: login.password };
+      // Bij een fout het (halve) update.zip weer van het scherm halen: het neemt ruimte in en het
+      // scherm kan een kapot bestand anders zelf als update aanbieden.
+      const cleanup = async () => {
+        try { await ftp.remove(dev.ip, account, 'update.zip'); return 'het (halve) update.zip is van het scherm verwijderd'; } catch (e) { return `update.zip kon niet van het scherm worden verwijderd (${e.message})`; }
+      };
+      try {
+        await ftp.upload(dev.ip, account, fw.file, 'update.zip', (sent, size) => {
+          if (params.onStep) params.onStep(dev, `upload ${Math.floor((sent / size) * 100)}% (${Math.round(sent / 1048576)} van ${Math.round(size / 1048576)} MB)`, 'upload');
+        }, 120000);
+      } catch (e) {
+        throw new Error(`${e.message}; ${await cleanup()}`);
+      }
       if (params.onStep) params.onStep(dev, 'upload klaar, upgrade starten', 'starten');
-      const r = await send(dev, cfg, [hex(upgrade.code), 0x00]);
+      const r = await send(dev, cfg, [hex(upgrade.code), 0x00]).catch((e) => { throw new Error(`startcommando 0x20: ${e.message}`); });
       const started = (r[0] === hex(upgrade.code) && r[1] === 0x06) || ackResult(r).ok;
-      if (!started) return { ok: false, code: 'FW_NOT_STARTED', error: `Upgrade niet gestart: ${ackResult(r).error}` };
+      if (!started) return { ok: false, code: 'FW_NOT_STARTED', error: `Upgrade niet gestart: ${ackResult(r).error}; ${await cleanup()}` };
       // Het scherm herstart en is 5+ minuten bezig; daarna de versie teruglezen.
       const deadline = Date.now() + (cfg.firmwareWaitMinutes || 25) * 60000;
       let last = null;

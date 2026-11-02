@@ -10,7 +10,12 @@ function connect(host, port, timeoutMs) {
     let buf = '';
     const waiters = [];
     const lines = [];
-    sock.setTimeout(timeoutMs, () => { sock.destroy(new Error('FTP time-out')); });
+    let connected = false;
+    sock.once('connect', () => { connected = true; });
+    // Onderscheid: niet kunnen verbinden (server uit/onbereikbaar) vs. stilvallen tijdens een sessie.
+    sock.setTimeout(timeoutMs, () => {
+      sock.destroy(new Error(connected ? 'FTP time-out tijdens sessie' : `FTP-server niet bereikbaar op ${host}:${port} (time-out bij verbinden)`));
+    });
     sock.on('error', (e) => { while (waiters.length) waiters.shift().reject(e); reject(e); });
     sock.on('close', () => { const e = new Error('FTP-verbinding gesloten'); while (waiters.length) waiters.shift().reject(e); });
     sock.on('data', (chunk) => {
@@ -94,9 +99,10 @@ async function upload(host, ftp, localFile, remoteName, onProgress, timeoutMs = 
       rs.pipe(data);
     });
     const written = data.bytesWritten;
-    c.sock.setTimeout(timeoutMs, () => { c.sock.destroy(new Error('FTP time-out')); });
+    c.sock.setTimeout(timeoutMs, () => { c.sock.destroy(new Error('FTP time-out tijdens sessie')); });
     // Antwoord van de FTP-server op het scherm (226 = gelukt; anders de reden, bv. schijf vol).
-    const reply = await Promise.race([c.next(), new Promise((r) => setTimeout(() => r(null), 15000))]).catch(() => null);
+    // Ruim wachten: bij groot bestand en traag geheugen kan het wegschrijven even duren.
+    const reply = await Promise.race([c.next(), new Promise((r) => setTimeout(() => r(null), timeoutMs))]).catch(() => null);
     if (broken || !reply || ![226, 250].includes(reply.code)) {
       throw new Error(`Upload afgebroken na ${mb(written)} van ${mb(size)}`
         + `${broken ? `: ${broken}` : ''}${reply ? ` (FTP-server: ${reply.text})` : ' (geen antwoord van de FTP-server)'}`);

@@ -17,16 +17,7 @@ const os = require('os');
 const ROOT = __dirname;
 const readJson = (f) => JSON.parse(fs.readFileSync(path.join(ROOT, f), 'utf8'));
 // config.local.json (niet in git) overschrijft config.json, bv. voor wachtwoorden.
-function loadConfig() {
-  const base = readJson('config.json');
-  if (!fs.existsSync(path.join(ROOT, 'config.local.json'))) return base;
-  const local = readJson('config.local.json');
-  for (const [k, v] of Object.entries(local)) {
-    base[k] = v && typeof v === 'object' && !Array.isArray(v) ? { ...(base[k] || {}), ...v } : v;
-  }
-  return base;
-}
-const cfg = loadConfig();
+const cfg = require('./drivers/config').loadConfig(ROOT);
 const profiles = readJson('profiles.json');
 const profile = profiles.dline;
 const DATA_DIR = path.join(ROOT, 'data');
@@ -85,7 +76,7 @@ async function syncControl() {
     devices = fresh.map((d) => {
       const prev = byId.get(d.id);
       if (!prev) return d;
-      if (prev.ip !== d.ip) prev.identityMismatch = null; // nieuw IP in Control: opnieuw controleren
+      if (prev.ip !== d.ip) { prev.identityMismatch = null; prev.slowReadAt = 0; } // nieuw IP in Control: meteen opnieuw controleren
       for (const k of CONTROL_FIELDS) prev[k] = d[k];
       return prev;
     });
@@ -205,9 +196,18 @@ function httpDownload(url, dest, onProgress, hops = 0) {
       out.on('finish', () => resolve({ received, total }));
       out.on('error', reject);
       res.on('error', reject);
+      res.on('aborted', () => reject(new Error('Download afgebroken door de server')));
     });
+    // Valt de verbinding 60 s stil, dan afbreken in plaats van eindeloos "bezig".
+    req.setTimeout(60000, () => req.destroy(new Error('Download staat 60 seconden stil; verbinding verbroken')));
     req.on('error', reject);
   });
+}
+
+// Loopt er een firmware-upgrade voor schermen van deze serie? Dan het bestand niet vervangen.
+function upgradeRunning(series) {
+  return actions.some((a) => a.type === 'firmware' && !a.finishedAt
+    && a.targets.some((t) => !t.doneAt && seriesOf((byId.get(t.deviceId) || {}).model) === series));
 }
 
 async function downloadFirmware(series) {
@@ -226,6 +226,8 @@ async function downloadFirmware(series) {
     if (head.toString() !== 'PK') throw new Error('Gedownload bestand is geen zip (link verlopen of inlog vereist?)');
     if (st.total && st.received !== st.total) throw new Error('Download onvolledig');
     const ota = (() => { try { return onelink.otaInfo(part); } catch { return null; } })();
+    // Is er intussen een upgrade gestart, dan het bestand dat wordt geüpload niet vervangen.
+    if (upgradeRunning(series)) throw new Error('Er is intussen een firmware-upgrade voor deze serie gestart; download niet geplaatst. Probeer het na afloop opnieuw');
     fs.renameSync(part, path.join(dir, 'update.zip'));
     fs.writeFileSync(path.join(dir, 'version.txt'), info.version);
     fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ source: 'PPDS-kennisbank', page: info.page, platform: info.platform, url: info.url, downloadedAt: new Date().toISOString(), ota }, null, 2));
@@ -269,11 +271,12 @@ function firmwareOverview() {
   return out;
 }
 
-function publicDevice(d) {
+// `cat` = firmwareCatalog(), één keer per verzoek gelezen en voor alle schermen gebruikt.
+function publicDevice(d, cat) {
   const { ftp, ...rest } = d; // FTP-wachtwoord nooit naar de browser
   const s = seriesOf(d.model);
   const l = latest.series[s];
-  const ready = firmwareCatalog()[s];
+  const ready = cat[s];
   return {
     ...rest, ...supportInfo(d), hasFtp: !!(ftp && ftp.user),
     fwAvailable: ready ? ready.version : null,
@@ -346,7 +349,10 @@ async function runTarget(action, t) {
     let params = action.params;
     if (action.type === 'firmware') {
       ms = ((cfg.firmwareWaitMinutes || 25) + 30) * 60000;
-      const fw = firmwareCatalog()[seriesOf(dev.model)];
+      const s = seriesOf(dev.model);
+      const fw = firmwareCatalog()[s];
+      // Platform uit source.json, anders van de PPDS-pagina (bv. bij handmatig neergezette firmware).
+      if (fw && !fw.platform && latest.series[s]) fw.platform = latest.series[s].platform;
       params = {
         ...action.params,
         resolved: fw ? { [dev.id]: fw } : {},
@@ -398,14 +404,15 @@ function createAction(body, user) {
   if (err) return { error: err };
   const targets = [];
   const skipped = [];
+  const fwCat = type === 'firmware' ? firmwareCatalog() : {}; // één keer van schijf lezen
   for (const id of deviceIds) {
     const dev = byId.get(id);
     if (!dev) continue;
     const s = supportInfo(dev);
     if (!s.supported) skipped.push({ deviceId: id, name: dev.name, code: dev.identityMismatch ? 'IDENTITY_MISMATCH' : 'NAV', reason: s.reason });
-    else if (type === 'firmware' && !firmwareCatalog()[seriesOf(dev.model)]) skipped.push({ deviceId: id, name: dev.name, code: 'FW_NO_FILE', reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
-    else if (type === 'firmware' && otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])) {
-      skipped.push({ deviceId: id, name: dev.name, code: 'FW_OTA_MISMATCH', reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), firmwareCatalog()[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
+    else if (type === 'firmware' && !fwCat[seriesOf(dev.model)]) skipped.push({ deviceId: id, name: dev.name, code: 'FW_NO_FILE', reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
+    else if (type === 'firmware' && otaMismatch(seriesOf(dev.model), fwCat[seriesOf(dev.model)])) {
+      skipped.push({ deviceId: id, name: dev.name, code: 'FW_OTA_MISMATCH', reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), fwCat[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
     }
     else if (type === 'firmware' && actions.some((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((x) => x.deviceId === id))) {
       skipped.push({ deviceId: id, name: dev.name, code: 'FW_BUSY', reason: 'Er loopt al een firmware-upgrade op dit scherm' });
@@ -515,8 +522,13 @@ const server = http.createServer(async (req, res) => {
         controlError, ftp: await ftpCheck(), errors: errors.CATALOG,
       });
     }
-    if (req.method === 'GET' && p === '/api/devices') return send(res, 200, devices.map(publicDevice));
+    if (req.method === 'GET' && p === '/api/devices') {
+      await latestReady; // eerste raadpleging van de PPDS-kennisbank afwachten (nieuwste versies)
+      const cat = firmwareCatalog();
+      return send(res, 200, devices.map((d) => publicDevice(d, cat)));
+    }
     if (req.method === 'GET' && p === '/api/firmware') {
+      await latestReady;
       return send(res, 200, { dir: FW_DIR, kbError: latest.error, loadedAt: latest.loadedAt, series: firmwareOverview() });
     }
     if (req.method === 'POST' && (p === '/api/firmware/download' || p === '/api/firmware/reload')) {
@@ -526,6 +538,7 @@ const server = http.createServer(async (req, res) => {
       const s = String(body.series || '').toUpperCase();
       if (!latest.series[s]) return send(res, 400, { error: 'Onbekende serie' });
       if (downloads[s] && downloads[s].state === 'bezig') return send(res, 409, { error: 'Download loopt al' });
+      if (upgradeRunning(s)) return send(res, 409, { error: 'Er loopt een firmware-upgrade voor deze serie; ophalen kan na afloop' });
       downloadFirmware(s); // loopt op de achtergrond; voortgang via GET /api/firmware
       return send(res, 202, { ok: true });
     }

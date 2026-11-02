@@ -45,8 +45,9 @@ function classify(msg) {
   const m = String(msg || '');
   if (/451|device might be full|no space|ENOSPC/i.test(m)) return 'FTP_STORAGE_FULL';
   if (/530|login/i.test(m) && /FTP/i.test(m)) return 'FTP_LOGIN';
-  if (/2121|FTP/i.test(m) && /ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT|time-out/i.test(m)) return 'FTP_UNREACHABLE';
-  if (/Upload afgebroken|dataverbinding|ECONNRESET|EPIPE/i.test(m)) return 'FTP_TRANSFER';
+  // Stilvallen ná het verbinden is een afgebroken overdracht, geen onbereikbare server.
+  if (/Upload afgebroken|dataverbinding|tijdens sessie|ECONNRESET|EPIPE/i.test(m)) return 'FTP_TRANSFER';
+  if (/FTP-server niet bereikbaar/i.test(m) || (/:2121\b/.test(m) && /ECONNREFUSED|EHOSTUNREACH|ETIMEDOUT/i.test(m))) return 'FTP_UNREACHABLE';
   if (/Grootte op scherm/i.test(m)) return 'FTP_SIZE_MISMATCH';
   if (/NAV/.test(m)) return 'NAV';
   if (/NACK/.test(m)) return 'NACK';
