@@ -40,6 +40,16 @@ function rows(node, out = []) {
 const direct = (href) => /\.(zip|bin)(\?|$)/i.test(new URL(href).pathname) || /dl=1/.test(href);
 const toDownload = (href) => href.replace(/([?&])dl=0/, '$1dl=1');
 
+// Haalt uit een PDF van PPDS de eerste link naar update.zip (link-annotaties staan als
+// "/URI (…)" leesbaar in het PDF-bestand).
+async function zipLinkFromPdf(href) {
+  const r = await fetch(toDownload(href));
+  if (!r.ok) return null;
+  const s = Buffer.from(await r.arrayBuffer()).toString('latin1');
+  const m = [...s.matchAll(/\/URI\s*\(([^)]+)\)/g)].map((x) => x[1]).find((u) => /update\.zip/i.test(u));
+  return m || null;
+}
+
 // Haalt een modelpagina op en geeft de firmware-informatie terug. `page` is de gedeelde
 // paginalink; die gaat mee als Referer, net als bij een browser (anders geen inhoud).
 async function fetchSeries(contentId, page, cfg = {}) {
@@ -69,7 +79,14 @@ async function fetchSeries(contentId, page, cfg = {}) {
   const sop = row(/^FW Update Instructions/i);
 
   // Alleen een los update.zip is via de tool te installeren (SICP 0x20); een combinatiepakket
-  // (combofw.zip) of PDF met instructies is handmatig werk.
+  // (combofw.zip) is handmatig werk. Verwijst PPDS naar een PDF (bv. 3550Q "Latest FW.pdf"),
+  // dan staat de update.zip-link als link in die PDF.
+  let viaPdf = null;
+  if (android && /\.pdf(\?|$)/i.test(new URL(android.href).pathname)) {
+    viaPdf = android.href;
+    const zip = await zipLinkFromPdf(android.href).catch(() => null);
+    if (zip) android.href = zip;
+  }
   const file = android ? decodeURIComponent(new URL(android.href).pathname.split('/').pop()) : '';
   return {
     platform: (row(/^Platform$/i) || {}).text || null,
@@ -82,6 +99,7 @@ async function fetchSeries(contentId, page, cfg = {}) {
       direct: direct(android.href),
       installable: /^update\.zip$/i.test(file) && direct(android.href),
       url: toDownload(android.href),
+      viaPdf,
     } : null,
     scaler: scaler ? { version: scaler.text.replace(/^v/i, ''), href: scaler.href } : null,
     others: others.map((i) => ({ name: i.text, href: i.href })),

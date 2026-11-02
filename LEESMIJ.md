@@ -57,7 +57,10 @@ Een scherm heeft twee firmwaredelen:
 2. Open in de tool het tabblad **Firmware**. De tool raadpleegt de kennisbank en toont per serie de nieuwste Android- en scaler-versie, het platform en links naar de pagina, de release notes en de instructies. Gebruik **Vernieuwen** om de kennisbank opnieuw te raadplegen.
 3. Klik bij de serie op **Ophalen**. De knop verschijnt alleen als de kennisbank een los `update.zip` geeft. Bij een combinatiepakket (`combofw.zip`) of een PDF met instructies is het handmatig werk. De tool downloadt het bestand naar `firmware\<serie>\` en toont voor welk apparaat het volgens de update zelf bedoeld is.
    - Noemt het bestand een interne codenaam in plaats van het model, dan blokkeert de tool de upgrade tot je die codenaam bij `otaAliases` in `config.json` toestaat. Doe dat alleen na bevestiging door PPDS.
+   - Verwijst PPDS naar een PDF (zoals bij de 3550Q), dan haalt de tool de link naar `update.zip` uit die PDF.
+   - Een combinatiepakket (`combofw.zip`, scaler en Android samen) installeert de tool niet. PPDS beschrijft dat alleen via USB.
 4. **Controles vlak voor de upgrade:**
+   - het scherm staat op power save **Mode 4**. Dat schrijft PPDS voor in de FW Update SOP;
    - serienummer en model van het scherm moeten overeenkomen met Control;
    - het platform van het scherm (SICP `0xA2 0x01`) moet overeenkomen met het platform op de PPDS-pagina;
    - de Android-versie moet uitleesbaar zijn, zodat de tool na afloop kan controleren of de upgrade gelukt is.

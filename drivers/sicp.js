@@ -309,6 +309,13 @@ async function execute(dev, type, params, profile, cfg) {
       // Zonder uitleesbare versie is de upgrade achteraf niet te bevestigen: dan niet starten.
       if (!before) return { ok: false, error: 'Android-firmwareversie niet uitleesbaar via SICP (0xA1 0x03); upgrade niet gestart omdat het resultaat niet te controleren is' };
       if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
+      // PPDS-voorschrift (FW Update SOP): zet het scherm vóór een firmware-update op power save Mode 4.
+      if (!(await read(dev, profile, cfg, 'powerSaveGet'))) {
+        return { ok: false, error: 'Power-save-modus niet uitleesbaar; PPDS schrijft Mode 4 voor tijdens een firmware-update. Upgrade niet gestart' };
+      }
+      if (dev.powerSaveMode !== '4') {
+        return { ok: false, error: `Scherm staat op power save Mode ${dev.powerSaveMode}; PPDS schrijft Mode 4 voor tijdens een firmware-update. Zet eerst Mode 4 (tabblad Power save) en probeer opnieuw` };
+      }
       // Platform van het scherm moet overeenkomen met het platform op de PPDS-pagina.
       if (fw.platform) {
         const live = await readPlatform(dev, cfg).catch(() => null);
