@@ -47,19 +47,27 @@ Bron voor alle codes: *The SICP Commands Document V2.13* van PPDS.
 | Firmware-upgrade | FTP-upload `update.zip` + 0x20 | gedocumenteerd (§11.13), **nog niet op een scherm getest** |
 
 ### Firmware-upgrade
-1. Zet het PPDS-overzicht `One_Link.xlsm` in je map Downloads, of zet het pad in `onelinkFile` in `config.json`. De tool leest daaruit per serie de nieuwste firmware en de downloadlink. Gebruik **Vernieuwen** na een nieuwe versie van One_Link.
-2. Open in de tool het tabblad **Firmware** en klik bij de serie op **Ophalen**. De tool downloadt `update.zip` naar `firmware\<serie>\` en zet `version.txt` en `source.json` klaar. Na het downloaden toont hij voor welk apparaat het bestand volgens de update zelf bedoeld is.
-   - De knop verschijnt alleen als One_Link een versie in SICP-notatie geeft (bijvoorbeeld V1.028). Alleen dan kan de tool na de upgrade controleren of die gelukt is.
-   - Staat dezelfde link in One_Link ook bij andere series, dan waarschuwt de tool. Je moet dan bevestigen dat de firmware bij het model hoort.
-   - Noemt het bestand een interne codenaam in plaats van het model (bijvoorbeeld de 3550Q-firmware: "sugarcane"), dan blokkeert de tool de upgrade. Laat PPDS bevestigen dat de codenaam bij de serie hoort en zet hem daarna in `config.json`: `"otaAliases": { "3550Q": ["sugarcane"] }`.
-   - Handmatig kan ook: zet `update.zip` in `firmware\<serie>\` en de versie in `firmware\<serie>\version.txt`. Gebruik de notatie die het scherm meldt, bijvoorbeeld `1.028`.
-3. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
-4. **Voortest (start geen upgrade):** `node tools\test-firmware.js <ip>`. Het script controleert:
-   - de firmwareversie via SICP, en welke notatie je in `version.txt` moet gebruiken;
+Bron: de **PPDS-kennisbank** (https://www.ppds.com/support/kb/signage), op advies van PPDS. One_Link wordt niet meer gebruikt: dat overzicht bevatte fouten.
+
+Een scherm heeft twee firmwaredelen:
+- **Android-firmware (FBxx.yy):** wordt bijgewerkt met `update.zip`. Dit doet de tool. Uitlezen gaat met SICP `0xA1 0x03`.
+- **Scaler-firmware (v1.0xx):** wordt alleen getoond. Bijwerken gaat volgens de instructies van PPDS.
+
+1. In `kb-catalog.json` staat per serie de PPDS-pagina, met het pagina-ID. Een nieuwe serie voeg je daar toe. Het ID vind je in het netwerkverkeer van de pagina (`SharedContentQuery` → `singleContent.id`).
+2. Open in de tool het tabblad **Firmware**. De tool raadpleegt de kennisbank en toont per serie de nieuwste Android- en scaler-versie, het platform en links naar de pagina, de release notes en de instructies. Gebruik **Vernieuwen** om de kennisbank opnieuw te raadplegen.
+3. Klik bij de serie op **Ophalen**. De knop verschijnt alleen als de kennisbank een los `update.zip` geeft. Bij een combinatiepakket (`combofw.zip`) of een PDF met instructies is het handmatig werk. De tool downloadt het bestand naar `firmware\<serie>\` en toont voor welk apparaat het volgens de update zelf bedoeld is.
+   - Noemt het bestand een interne codenaam in plaats van het model, dan blokkeert de tool de upgrade tot je die codenaam bij `otaAliases` in `config.json` toestaat. Doe dat alleen na bevestiging door PPDS.
+4. **Controles vlak voor de upgrade:**
+   - serienummer en model van het scherm moeten overeenkomen met Control;
+   - het platform van het scherm (SICP `0xA2 0x01`) moet overeenkomen met het platform op de PPDS-pagina;
+   - de Android-versie moet uitleesbaar zijn, zodat de tool na afloop kan controleren of de upgrade gelukt is.
+5. Vul `displayFtp` in `config.json` in (FTP-account van de schermen, poort 2121). Het wachtwoord in Control staat versleuteld opgeslagen en is niet bruikbaar.
+6. **Voortest (start geen upgrade):** `node tools\test-firmware.js <ip>`. Het script controleert:
+   - de Android-firmware en het platform via SICP;
    - de FTP-login;
    - het uploaden van een testbestand van 1 MB, dat daarna weer wordt verwijderd;
    - hoe lang de upload van `update.zip` ongeveer duurt.
-5. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
+7. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 

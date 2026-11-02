@@ -34,8 +34,10 @@ const bad = (m) => console.log(`  FOUT  ${m}`);
   console.log(`Firmware-voortest op ${host} (er wordt geen upgrade gestart)\n`);
   let fails = 0;
 
-  const fw = await sicp([0xA1, 0x01]);
-  if (fw && fw[0] === 0xA1) ok(`Firmwareversie via SICP: ${Buffer.from(fw.slice(1)).toString('latin1').trim()}  -> gebruik deze notatie in version.txt`);
+  const fw = await sicp([0xA1, 0x03]);
+  const pl = await sicp([0xA2, 0x01]);
+  if (pl && pl[0] === 0xA2) ok(`Platform via SICP: ${Buffer.from(pl.slice(1)).toString('latin1').trim()} (moet overeenkomen met de PPDS-pagina)`);
+  if (fw && fw[0] === 0xA1) ok(`Android-firmware via SICP: ${Buffer.from(fw.slice(1)).toString('latin1').trim()}`);
   else { bad('Firmwareversie niet uitleesbaar via SICP; de tool zal op dit model geen upgrade starten'); fails++; }
 
   const login = cfg.displayFtp || {};

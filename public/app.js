@@ -68,20 +68,21 @@ function scheduleText(s) {
 
 // ---------- firmware ----------
 
-// Nieuwste versie volgens One_Link vergelijken met wat het scherm meldt:
-// SICP-notatie (1.028) met fwVersion, Android-notatie (FB01.19) met de firmware uit Control.
+// Nieuwste Android-firmware volgens de PPDS-kennisbank vergelijken met wat het scherm
+// meldt (SICP 0xA1 0x03, of anders de firmware uit Control).
 function fwUpdateLabel(d) {
   if (!d.fwLatest) return '';
-  const sicpStyle = /^\d+\.\d+/.test(d.fwLatest);
-  const current = sicpStyle ? d.fwVersion : d.firmware;
-  if (!current || current === d.fwLatest) return '';
+  const current = d.fwVersion || d.firmware;
+  if (!current || current.toUpperCase() === d.fwLatest.toUpperCase()) return '';
   return ` · <strong>nieuwste ${esc(d.fwLatest)}</strong>`;
 }
+
+const link = (href, text) => (href ? `<a href="${esc(href)}" target="_blank" rel="noopener">${esc(text)}</a>` : '');
 
 const mb = (n) => `${Math.round(n / 1048576)} MB`;
 
 async function renderFirmware() {
-  const fw = await api('/api/firmware').catch((e) => ({ series: {}, onelinkError: e.message }));
+  const fw = await api('/api/firmware').catch((e) => ({ series: {}, kbError: e.message }));
   const cards = Object.entries(fw.series)
     .sort((a, b) => b[1].inUse - a[1].inUse)
     .map(([s, v]) => {
@@ -89,12 +90,14 @@ async function renderFirmware() {
       const dl = v.download;
       const lines = [];
       lines.push(`<div class="row"><strong>${esc(s)}</strong><span class="muted">${v.inUse} scherm${v.inUse === 1 ? '' : 'en'}</span></div>`);
-      if (!l) lines.push('<span class="muted">Niet gevonden in One_Link</span>');
+      if (!l) lines.push(`<span class="muted">${esc(v.kbError || 'Niet gevonden in de PPDS-kennisbank')}</span>`);
       else {
-        lines.push(`<span>Nieuwste: <strong>${esc(l.version || l.androidFw || '?')}</strong>${l.version && l.androidFw ? ` <span class="muted">(${esc(l.androidFw)})</span>` : ''}</span>`);
-        if (!v.upgradable) lines.push('<span class="warn-text">Geen versie bekend in One_Link: handmatig bijwerken (USB/CMND).</span>');
-        else if (!l.version) lines.push('<span class="muted">Alleen Android-versie bekend; werkt alleen op schermen die hun versie via SICP melden (de tool controleert dit vooraf).</span>');
-        if (l.sharedWith && l.sharedWith.length) lines.push(`<span class="warn-text">Let op: dezelfde downloadlink staat in One_Link ook bij ${esc(l.sharedWith.join(', '))}. Controleer of dit de juiste firmware is.</span>`);
+        lines.push(`<span>Nieuwste Android: <strong>${esc(l.version || '?')}</strong>${l.scaler ? ` <span class="muted">· scaler v${esc(l.scaler)}</span>` : ''}</span>`);
+        if (l.platform) lines.push(`<span class="muted">Platform: ${esc(l.platform)}</span>`);
+        if (!v.upgradable) {
+          lines.push(`<span class="warn-text">Geen los update.zip in de kennisbank (${esc(l.file || 'onbekend')}): handmatig bijwerken volgens de instructies van PPDS.</span>`);
+        }
+        lines.push(`<span class="small">${[link(l.page, 'PPDS-pagina'), link(l.releaseNotes, 'Release notes'), link(l.instructions, 'Instructies'), link(l.manual, 'Firmware (handmatig)')].filter(Boolean).join(' · ')}</span>`);
       }
       if (v.ready) {
         lines.push(`<span class="ok-text">Klaargezet: ${esc(v.ready.version)} (${mb(v.ready.size)})</span>`);
@@ -106,13 +109,12 @@ async function renderFirmware() {
         lines.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted">Downloaden… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);
       } else if (dl && dl.state === 'mislukt') lines.push(`<span class="bad-text">Download mislukt: ${esc(dl.error)}</span>`);
       if (l && v.upgradable && !(dl && dl.state === 'bezig')) {
-        const want = String(l.version || l.androidFw || '').replace(/^FB/i, '');
-        const label = v.ready && v.ready.version === want ? 'Opnieuw ophalen' : 'Ophalen';
+        const label = v.ready && v.ready.version === l.version ? 'Opnieuw ophalen' : 'Ophalen';
         lines.push(`<div class="row"><span></span><button class="ghost" data-fetch="${esc(s)}">${label}</button></div>`);
       }
       return `<div class="fw-card">${lines.join('')}</div>`;
     });
-  $('#fwInfo').innerHTML = (fw.onelinkError ? `<p class="note warn">${esc(fw.onelinkError)}</p>` : '') + (cards.join('') || '<p class="muted">Geen series gevonden.</p>');
+  $('#fwInfo').innerHTML = (fw.kbError ? `<p class="note warn">${esc(fw.kbError)}</p>` : '') + (cards.join('') || '<p class="muted">Geen series gevonden.</p>');
   return Object.values(fw.series).some((v) => v.download && v.download.state === 'bezig');
 }
 
@@ -152,8 +154,8 @@ function renderDevices() {
       <td>${d.currentSource ? esc(sourceLabel(d.currentSource)) : '<span class="muted small">–</span>'}
         <div class="dev-sub" title="Bron waarop het scherm opstart">opstart: ${d.bootSource ? esc(sourceLabel(d.bootSource)) : '?'}</div>
         <div class="dev-sub" title="${esc(scheduleText(d.schedule) || 'Schema nog niet uitgelezen: gebruik Uitlezen')}">schema: ${scheduleSummary(d.schedule)}</div></td>
-      <td class="muted"><div>${esc(d.fwVersion || '–')}</div>
-        <div class="dev-sub">${esc(d.firmware || '')}${fwUpdateLabel(d)}</div></td>
+      <td class="muted"><div title="Android-firmware">${esc(d.fwVersion || d.firmware || '–')}</div>
+        <div class="dev-sub">${d.fwScaler ? `scaler ${esc(d.fwScaler)}` : ''}${fwUpdateLabel(d)}</div></td>
       <td><button class="icon" data-shot="${esc(d.id)}">Screenshot</button></td>
     </tr>`;
   });
@@ -233,7 +235,7 @@ function collectParams() {
       return params;
     }
     case 'bootSource': return { source: $('#bootSource').value };
-    case 'firmware': return { confirm: $('#fwConfirm').value.trim(), confirmShared: $('#fwShared').checked };
+    case 'firmware': return { confirm: $('#fwConfirm').value.trim() };
     case 'schedule': return {
       entries: $$('.schedrow').map((r) => ({
         days: $$('.days input:checked', r).map((c) => Number(c.value)),
@@ -387,7 +389,7 @@ async function init() {
   $('#fwInfo').addEventListener('click', async (e) => {
     const s = e.target.dataset.fetch;
     if (!s) return;
-    if (!confirm(`Firmware voor serie ${s} downloaden van de PPDS-link in One_Link? Dit kan enkele GB zijn.`)) return;
+    if (!confirm(`Firmware voor serie ${s} downloaden via de PPDS-kennisbank? Dit kan enkele GB zijn.`)) return;
     e.target.disabled = true;
     try { await post('/api/firmware/download', { series: s }); } catch (err) { alert(err.message); }
     refreshFirmware();

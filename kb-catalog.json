@@ -1,0 +1,11 @@
+{
+  "_info": "Pagina's in de PPDS-kennisbank (https://www.ppds.com/support/kb/signage). contentId staat in het netwerkverkeer van de pagina (SharedContentQuery -> singleContent.id). Nieuwe serie? Voeg hem hier toe.",
+  "series": {
+    "4650D": { "page": "https://ppds.atlassian.net/wiki/external/MGM0YTgzNTkzZWViNGI3Y2I2NWNhZWMxMGY5NDQyMDc", "contentId": "180715522" },
+    "5050D": { "page": "https://ppds.atlassian.net/wiki/external/YzA0ODA3ZGYzNWYzNDE3YzkxODk0YmFlNmI2NGM5YTY", "contentId": "315228201" },
+    "3550Q": { "page": "https://ppds.atlassian.net/wiki/external/ZTcyZDAxZmJiMGU1NDM1M2I4NmZmYmY4NWE1M2UzNmM", "contentId": "218726471" },
+    "3751T": { "page": "https://ppds.atlassian.net/wiki/external/MzIzYzFiNTY2Y2QwNDkzOGI5ZGQ1NGMyMTJiNGQ0MGI", "contentId": "207486994" },
+    "3651T": { "page": "https://ppds.atlassian.net/wiki/external/YjllOWZiODAzY2JmNGZjOWFmNDA0MmIyNWRmY2NhOGQ", "contentId": "218366406" },
+    "4150I": { "page": "https://ppds.atlassian.net/wiki/external/OGFlZmIxMWNiYTFhNDJiNWEwNDIyZWZhNTM1ODA4YmE", "contentId": "218955899" }
+  }
+}

@@ -125,17 +125,33 @@ async function refreshAll(dev, profile, cfg) {
       if (name === 'coldStartGet') dev.coldStart = null;
     }
   }
-  const fw = await readFirmware(dev, profile, cfg).catch(() => null);
+  const fw = await readFirmware(dev, profile, cfg, 0x03).catch(() => null);
   if (fw) dev.fwVersion = fw;
+  const sc = await readFirmware(dev, profile, cfg, 0x01).catch(() => null);
+  if (sc) dev.fwScaler = sc;
+  const pl = await readPlatform(dev, cfg).catch(() => null);
+  if (pl) dev.platformLive = pl;
 }
 
-// SICP 2.13 §3.x "Model & Firmware Information": 0xA1 met 0x01 = firmwareversie (ASCII, bv. "1.027").
-async function readFirmware(dev, profile, cfg) {
+// SICP 2.13 §3.2 "Model & Firmware Information" (0xA1):
+//   0x03 = Android-firmware (FBxx.xx) -> dit werkt update.zip bij
+//   0x01 = scaler-firmware (bv. 1.027; NAV als er geen scaler is)
+async function readFirmware(dev, profile, cfg, which = 0x03) {
   const c = command(profile, cfg, 'firmwareGet');
-  const d = await send(dev, cfg, [hex(c.code), 0x01]);
+  const d = await send(dev, cfg, [hex(c.code), which]);
   if (d[0] !== hex(c.code)) return null;
   return Buffer.from(d.slice(1)).toString('latin1').replace(/\0/g, '').trim() || null;
 }
+
+// SICP 2.13 §3.1 (0xA2 0x01): platformlabel, bv. "RK3399_NT68402_D". Staat ook op de PPDS-pagina.
+async function readPlatform(dev, cfg) {
+  const d = await send(dev, cfg, [0xA2, 0x01]);
+  if (d[0] !== 0xA2) return null;
+  return Buffer.from(d.slice(1)).toString('latin1').replace(/\0/g, '').trim() || null;
+}
+
+// Platform van het scherm vs. platform op de PPDS-pagina ("BDL3550Q 3.0" ~ "BDL3550Q").
+const samePlatform = (a, b) => String(a || '').trim().split(/\s+/)[0].toUpperCase() === String(b || '').trim().split(/\s+/)[0].toUpperCase();
 
 // Versies vergelijkbaar maken: 'V1.028' -> '1.028', 'FB02.12' -> '02.12' (zo meldt o.a. de Q-Line het via SICP).
 const normVersion = (v) => String(v || '').trim().replace(/^v/i, '').replace(/^FB/i, '');
@@ -289,10 +305,16 @@ async function execute(dev, type, params, profile, cfg) {
       // params.file / params.version worden door de server per model ingevuld.
       const fw = params.resolved && params.resolved[dev.id];
       if (!fw) return { ok: false, error: 'Geen firmwarebestand gevonden voor dit model' };
-      const before = await readFirmware(dev, profile, cfg).catch(() => null);
+      const before = await readFirmware(dev, profile, cfg, 0x03).catch(() => null);
       // Zonder uitleesbare versie is de upgrade achteraf niet te bevestigen: dan niet starten.
-      if (!before) return { ok: false, error: 'Firmwareversie niet uitleesbaar via SICP (0xA1); upgrade niet gestart omdat het resultaat niet te controleren is' };
+      if (!before) return { ok: false, error: 'Android-firmwareversie niet uitleesbaar via SICP (0xA1 0x03); upgrade niet gestart omdat het resultaat niet te controleren is' };
       if (sameVersion(before, fw.version)) return { ok: true, detail: `al actueel (${before})` };
+      // Platform van het scherm moet overeenkomen met het platform op de PPDS-pagina.
+      if (fw.platform) {
+        const live = await readPlatform(dev, cfg).catch(() => null);
+        if (!live) return { ok: false, error: 'Platform van het scherm niet uitleesbaar (0xA2 0x01); upgrade niet gestart' };
+        if (!samePlatform(live, fw.platform)) return { ok: false, error: `Scherm heeft platform ${live}, de firmware is voor ${fw.platform}; upgrade niet gestart` };
+      }
       // version.txt moet dezelfde notatie hebben als het scherm meldt (bv. 1.028, niet FB01.19).
       if (/^\d+\.\d+/.test(normVersion(before)) !== /^\d+\.\d+/.test(normVersion(fw.version))) {
         return { ok: false, error: `version.txt (${fw.version}) heeft een andere notatie dan het scherm meldt (${before}); pas version.txt aan` };
@@ -317,7 +339,7 @@ async function execute(dev, type, params, profile, cfg) {
       let last = null;
       while (Date.now() < deadline) {
         await sleep(30000);
-        last = await readFirmware(dev, profile, cfg).catch(() => null) || last;
+        last = await readFirmware(dev, profile, cfg, 0x03).catch(() => null) || last;
         if (params.onStep) params.onStep(dev, last ? `bezig, scherm meldt ${last}` : 'bezig, scherm herstart');
         if (sameVersion(last, fw.version)) return { ok: true, detail: `${before} → ${last}` };
       }

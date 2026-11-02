@@ -8,7 +8,8 @@ const crypto = require('crypto');
 const demo = require('./drivers/demo');
 const sicp = require('./drivers/sicp');
 const control = require('./drivers/control');
-const onelink = require('./drivers/onelink');
+const onelink = require('./drivers/onelink'); // alleen nog voor het lezen van OTA-metadata uit update.zip
+const ppdskb = require('./drivers/ppdskb');
 const https = require('https');
 const os = require('os');
 
@@ -147,22 +148,42 @@ function firmwareCatalog() {
   return out;
 }
 
-// Nieuwste firmware per serie volgens het PPDS-overzicht One_Link.xlsm.
-const ONELINK = cfg.onelinkFile || path.join(os.homedir(), 'Downloads', 'One_Link.xlsm');
-let latest = { series: {}, error: null, loadedAt: null };
-function loadLatest() {
-  try {
-    const s = onelink.parseFirmware(ONELINK);
-    // Links die bij meerdere series staan, zijn verdacht (kopieerfout in het overzicht).
-    const byUrl = {};
-    for (const [k, v] of Object.entries(s)) (byUrl[v.url] = byUrl[v.url] || []).push(k);
-    for (const [k, v] of Object.entries(s)) v.sharedWith = byUrl[v.url].filter((x) => x !== k);
-    latest = { series: s, error: null, loadedAt: new Date().toISOString() };
-  } catch (e) {
-    latest = { series: {}, error: `One_Link niet leesbaar (${ONELINK}): ${e.message}`, loadedAt: null };
+// Nieuwste firmware per serie volgens de PPDS-kennisbank (kb-catalog.json -> pagina per serie).
+const KB_CATALOG = path.join(ROOT, 'kb-catalog.json');
+let latest = { series: {}, error: null, loadedAt: null, errors: {} };
+async function loadLatest() {
+  let catalog = {};
+  try { catalog = JSON.parse(fs.readFileSync(KB_CATALOG, 'utf8')).series || {}; } catch (e) {
+    latest = { series: {}, error: `kb-catalog.json niet leesbaar: ${e.message}`, loadedAt: null, errors: {} };
+    return;
   }
+  const series = {};
+  const errors = {};
+  await Promise.all(Object.entries(catalog).map(async ([s, page]) => {
+    try {
+      const kb = await ppdskb.fetchSeries(page.contentId, page.page, cfg);
+      const a = kb.android;
+      series[s.toUpperCase()] = {
+        version: a ? a.version : null, // Android-firmware, bv. FB01.20 (zoals SICP 0xA1 0x03 hem meldt)
+        label: a ? a.label : null,
+        file: a ? a.file : null,
+        url: a && a.installable ? a.url : null,
+        manual: a && !a.installable ? a.href : null,
+        scaler: kb.scaler ? kb.scaler.version : null,
+        platform: kb.platform,
+        page: page.page,
+        releaseNotes: kb.releaseNotes,
+        instructions: kb.instructions,
+      };
+    } catch (e) { errors[s.toUpperCase()] = e.message; }
+  }));
+  const failed = Object.keys(errors);
+  latest = {
+    series, errors, loadedAt: new Date().toISOString(),
+    error: failed.length && !Object.keys(series).length ? `PPDS-kennisbank niet bereikbaar: ${errors[failed[0]]}` : null,
+  };
 }
-loadLatest();
+const latestReady = loadLatest();
 
 const downloads = {}; // serie -> { state, received, total, error }
 
@@ -190,7 +211,8 @@ function httpDownload(url, dest, onProgress, hops = 0) {
 
 async function downloadFirmware(series) {
   const info = latest.series[series];
-  if (!info) throw new Error('Serie niet gevonden in One_Link');
+  if (!info) throw new Error('Serie niet gevonden in de PPDS-kennisbank');
+  if (!info.url) throw new Error('Voor deze serie is geen los update.zip beschikbaar; volg de instructies van PPDS');
   if (downloads[series] && downloads[series].state === 'bezig') throw new Error('Download loopt al');
   const dir = path.join(FW_DIR, series);
   fs.mkdirSync(dir, { recursive: true });
@@ -204,9 +226,8 @@ async function downloadFirmware(series) {
     if (st.total && st.received !== st.total) throw new Error('Download onvolledig');
     const ota = (() => { try { return onelink.otaInfo(part); } catch { return null; } })();
     fs.renameSync(part, path.join(dir, 'update.zip'));
-    // Alleen een Android-versie (FB02.12)? Dan zonder 'FB', zoals het scherm hem via SICP meldt.
-    fs.writeFileSync(path.join(dir, 'version.txt'), info.version || String(info.androidFw || '').replace(/^FB/i, ''));
-    fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ androidFw: info.androidFw, url: info.url, downloadedAt: new Date().toISOString(), ota }, null, 2));
+    fs.writeFileSync(path.join(dir, 'version.txt'), info.version);
+    fs.writeFileSync(path.join(dir, 'source.json'), JSON.stringify({ source: 'PPDS-kennisbank', page: info.page, platform: info.platform, url: info.url, downloadedAt: new Date().toISOString(), ota }, null, 2));
     st.state = 'klaar';
   } catch (e) {
     try { fs.unlinkSync(part); } catch { /* al weg */ }
@@ -236,12 +257,12 @@ function firmwareOverview() {
     const l = latest.series[s] || null;
     out[s] = {
       inUse: devices.filter((d) => seriesOf(d.model) === s).length,
-      latest: l && { version: l.version, androidFw: l.androidFw, sharedWith: l.sharedWith, models: l.models },
+      latest: l && { version: l.version, label: l.label, file: l.file, scaler: l.scaler, platform: l.platform, page: l.page, manual: l.manual, releaseNotes: l.releaseNotes, instructions: l.instructions },
+      kbError: latest.errors[s] || (latest.loadedAt && !l && s ? 'Serie staat niet in kb-catalog.json' : null),
       ready: ready[s] ? { version: ready[s].version, size: ready[s].size, ota: ready[s].ota || null, downloadedAt: ready[s].downloadedAt || null, mismatch: otaMismatch(s, ready[s]) } : null,
       download: downloads[s] || null,
-      // Upgraden kan met een SICP-versie (V1.028) of Android-versie (FB02.12); of het scherm zijn
-      // versie ook echt via SICP meldt, controleert de upgrade zelf vooraf.
-      upgradable: !!(l && (l.version || l.androidFw)),
+      // Via de tool alleen met een los update.zip (Android-firmware, SICP 0x20).
+      upgradable: !!(l && l.url),
     };
   }
   return out;
@@ -255,7 +276,8 @@ function publicDevice(d) {
   return {
     ...rest, ...supportInfo(d), hasFtp: !!(ftp && ftp.user),
     fwAvailable: ready ? ready.version : null,
-    fwLatest: l ? (l.version || l.androidFw) : null,
+    fwLatest: l ? l.version : null,
+    fwLatestScaler: l ? l.scaler : null,
   };
 }
 
@@ -359,14 +381,6 @@ function createAction(body, user) {
   }
   if (!targets.length) return { error: type === 'firmware' ? 'Geen geselecteerd scherm heeft firmware klaarstaan in de map' : 'Geen ondersteunde schermen geselecteerd', skipped };
   if (type === 'firmware' && params.confirm !== 'UPGRADE') return { error: 'Bevestig de firmware-upgrade door UPGRADE te typen' };
-  if (type === 'firmware') {
-    // Firmware van een link die One_Link bij meerdere series noemt: alleen na expliciete controle.
-    const shared = [...new Set(targets.map((t) => seriesOf(byId.get(t.deviceId).model)))]
-      .filter((s) => (latest.series[s]?.sharedWith || []).length);
-    if (shared.length && params.confirmShared !== true) {
-      return { error: `De downloadlink voor ${shared.join(', ')} staat in One_Link ook bij andere series. Controleer dat de firmware bij dit model hoort en vink de bevestiging aan.` };
-    }
-  }
   const action = {
     id: crypto.randomUUID(), type, params, user, createdAt: new Date().toISOString(),
     finishedAt: null, targets, skipped,
@@ -470,12 +484,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && p === '/api/devices') return send(res, 200, devices.map(publicDevice));
     if (req.method === 'GET' && p === '/api/firmware') {
-      return send(res, 200, { dir: FW_DIR, onelink: ONELINK, onelinkError: latest.error, loadedAt: latest.loadedAt, series: firmwareOverview() });
+      return send(res, 200, { dir: FW_DIR, kbError: latest.error, loadedAt: latest.loadedAt, series: firmwareOverview() });
     }
     if (req.method === 'POST' && (p === '/api/firmware/download' || p === '/api/firmware/reload')) {
       if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });
       const body = await readBody(req);
-      if (p === '/api/firmware/reload') { loadLatest(); return send(res, 200, { ok: !latest.error, error: latest.error }); }
+      if (p === '/api/firmware/reload') { await loadLatest(); return send(res, 200, { ok: !latest.error, error: latest.error }); }
       const s = String(body.series || '').toUpperCase();
       if (!latest.series[s]) return send(res, 400, { error: 'Onbekende serie' });
       if (downloads[s] && downloads[s].state === 'bezig') return send(res, 409, { error: 'Download loopt al' });
