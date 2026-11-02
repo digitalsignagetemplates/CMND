@@ -80,17 +80,27 @@ async function upload(host, ftp, localFile, remoteName, onProgress, timeoutMs = 
     if (![125, 150].includes(first.code)) { data.destroy(); throw new Error(`FTP STOR: ${first.text}`); }
     // Tijdens de overdracht is het stuurkanaal stil; de idle-time-out geldt dan alleen voor het datakanaal.
     c.sock.setTimeout(0);
-    let sent = 0;
-    await new Promise((res, rej) => {
+    const mb = (n) => `${Math.round(n / 1048576)} MB`;
+    // Voortgang op basis van wat echt over het netwerk is verstuurd; bij een fout stopt het
+    // lezen meteen, zodat de foutmelding niet door de voortgang wordt overschreven.
+    let broken = null;
+    await new Promise((res) => {
       const rs = fs.createReadStream(localFile);
-      rs.on('data', (b) => { sent += b.length; if (onProgress) onProgress(sent, size); });
-      rs.on('error', rej);
-      data.on('error', rej);
-      data.on('close', res);
+      const stop = (why) => { if (!broken) { broken = why; rs.unpipe(data); rs.destroy(); data.destroy(); } res(); };
+      rs.on('data', () => { if (!broken && onProgress) onProgress(data.bytesWritten, size); });
+      rs.on('error', (e) => stop(`lokaal bestand: ${e.message}`));
+      data.on('error', (e) => stop(`dataverbinding: ${e.code || e.message}`));
+      data.on('close', () => { if (rs.readableEnded) res(); else stop('dataverbinding door het scherm gesloten'); });
       rs.pipe(data);
     });
+    const written = data.bytesWritten;
     c.sock.setTimeout(timeoutMs, () => { c.sock.destroy(new Error('FTP time-out')); });
-    await expect(c.next(), [226, 250], 'upload');
+    // Antwoord van de FTP-server op het scherm (226 = gelukt; anders de reden, bv. schijf vol).
+    const reply = await Promise.race([c.next(), new Promise((r) => setTimeout(() => r(null), 15000))]).catch(() => null);
+    if (broken || !reply || ![226, 250].includes(reply.code)) {
+      throw new Error(`Upload afgebroken na ${mb(written)} van ${mb(size)}`
+        + `${broken ? `: ${broken}` : ''}${reply ? ` (FTP-server: ${reply.text})` : ' (geen antwoord van de FTP-server)'}`);
+    }
     const sz = await c.cmd(`SIZE ${remoteName}`);
     if (sz.code === 213 && Number(sz.text.split(' ').pop()) !== size) {
       throw new Error(`Grootte op scherm (${sz.text.split(' ').pop()}) wijkt af van lokaal (${size})`);
