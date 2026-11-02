@@ -29,6 +29,7 @@
     "3550Q": ["sugarcane"]
   },
   "firmwareConcurrency": 1,
+  "firmwareMaxConcurrency": 3,
   "firmwareWaitMinutes": 25,
   "displayFtp": {
     "port": 2121,

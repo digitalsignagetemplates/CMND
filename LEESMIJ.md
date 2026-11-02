@@ -70,7 +70,12 @@ Een scherm heeft twee firmwaredelen:
    - de FTP-login;
    - het uploaden van een testbestand van 1 MB, dat daarna weer wordt verwijderd;
    - hoe lang de upload van `update.zip` ongeveer duurt.
-7. In de tool: selecteer de schermen, open het tabblad Firmware en typ `UPGRADE`. Standaard gaat het één scherm tegelijk. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
+7. **Bulk bijwerken in het overzicht "Firmware-updates"** (onder de schermlijst):
+   1. Kies een **serie**. Elke tegel toont het aantal schermen, hoeveel een update nodig hebben, en of de firmware klaarstaat.
+   2. Vink de schermen aan (of **Alles**) en klik op **Controleer geselecteerde**. Per scherm zie je ✓/✗ voor: bereikbaar, aan, juist apparaat, versie uitleesbaar, Mode 4, platform, bestand en FTP-login. Bij een ✗ staan de reden en de oplossing erbij. De controle wijzigt niets, behalve dat hij één keer inlogt op de FTP-server.
+   3. Gebruik zo nodig **Zet Mode 4 op geselecteerde** en controleer opnieuw.
+   4. **Selecteer alle klare** en klik op **Start update**. Je krijgt een samenvatting met het aantal schermen, de versies van → naar en een geschatte duur. Je kiest hoeveel schermen tegelijk (1–3; standaard 1) en bevestigt met `UPGRADE`.
+   5. In hetzelfde overzicht volg je de voortgang: het totaal (klaar / bezig / mislukt / wachtrij) en per scherm de fase. De tool uploadt het bestand, start de upgrade en leest daarna de versie terug (wacht maximaal `firmwareWaitMinutes`).
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 

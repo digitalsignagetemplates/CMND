@@ -56,7 +56,7 @@
         <button data-tab="bootSource">Bron</button>
         <button data-tab="schedule">Schema</button>
         <button data-tab="refresh">Uitlezen</button>
-        <button data-tab="firmware">Firmware</button>
+        <button data-goto="fwSection" title="Naar het overzicht Firmware-updates">Firmware ↓</button>
       </div>
 
       <div class="tab" data-panel="power">
@@ -89,13 +89,6 @@
         <p class="muted small">Vervangt het bestaande schema op het scherm.</p>
       </div>
 
-      <div class="tab hidden" data-panel="firmware">
-        <p class="note warn">Een firmware-upgrade duurt per scherm 10–30 minuten en het scherm herstart. Onderbreek de stroom niet. De tool doet standaard één scherm tegelijk.</p>
-        <div class="fw-head"><strong>Firmware per serie (PPDS-kennisbank)</strong><button id="fwReload" class="ghost" title="PPDS-kennisbank opnieuw raadplegen">Vernieuwen</button></div>
-        <div id="fwInfo" class="fw-list"></div>
-        <label class="field">Typ UPGRADE om te bevestigen <input id="fwConfirm" type="search" autocomplete="off" placeholder="UPGRADE"></label>
-      </div>
-
       <div class="tab hidden" data-panel="refresh">
         <p class="muted">Leest de actuele status opnieuw uit bij de geselecteerde schermen.</p>
       </div>
@@ -104,6 +97,15 @@
       <p id="runMsg" class="muted small"></p>
     </aside>
   </div>
+
+  <section class="card" id="fwSection">
+    <div class="card-head">
+      <div><h2>Firmware-updates</h2><p class="muted small">Nieuwste firmware volgens de PPDS-kennisbank. Kies een serie, controleer de schermen en start de update.</p></div>
+      <button id="fwReload" class="ghost" title="PPDS-kennisbank opnieuw raadplegen">Kennisbank vernieuwen</button>
+    </div>
+    <div id="fwSeries" class="fw-series"></div>
+    <div id="fwPanel"></div>
+  </section>
 
   <section class="card">
     <div class="card-head">
@@ -118,6 +120,18 @@
     <div id="actions"></div>
   </section>
 </main>
+
+<dialog id="fwDlg">
+  <div class="dlg-head"><strong>Firmware-update starten</strong><button id="fwDlgClose" class="ghost">Annuleren</button></div>
+  <div id="fwDlgBody"></div>
+  <div class="fw-dlg-form">
+    <label class="field">Tegelijk bijwerken
+      <select id="fwConc"><option value="1">1 scherm tegelijk (veiligst)</option><option value="2">2 schermen tegelijk</option><option value="3">3 schermen tegelijk</option></select>
+    </label>
+    <label class="field">Typ UPGRADE om te bevestigen <input id="fwConfirmTxt" type="search" autocomplete="off" placeholder="UPGRADE"></label>
+    <button id="fwDlgStart" class="primary block" disabled>Start update</button>
+  </div>
+</dialog>
 
 <dialog id="detail">
   <div class="dlg-head"><strong id="detailTitle"></strong><button id="detailClose" class="ghost">Sluiten</button></div>

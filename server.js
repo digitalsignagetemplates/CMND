@@ -392,7 +392,10 @@ function actionCsv(a) {
 
 async function runAction(action) {
   // Firmware standaard één scherm tegelijk.
-  const n = action.type === 'firmware' ? (cfg.firmwareConcurrency || 1) : cfg.batchSize;
+  // Firmware: standaard één scherm tegelijk; de gebruiker kan tot firmwareMaxConcurrency kiezen.
+  const n = action.type === 'firmware'
+    ? Math.max(1, Math.min(Number(action.params.concurrency) || cfg.firmwareConcurrency || 1, cfg.firmwareMaxConcurrency || 3))
+    : cfg.batchSize;
   await pool(action.targets, n, (t) => runTarget(action, t));
   action.finishedAt = new Date().toISOString();
   persist(action);
@@ -530,6 +533,29 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && p === '/api/firmware') {
       await latestReady;
       return send(res, 200, { dir: FW_DIR, kbError: latest.error, loadedAt: latest.loadedAt, series: firmwareOverview() });
+    }
+    if (req.method === 'POST' && p === '/api/firmware/preflight') {
+      if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });
+      const body = await readBody(req);
+      const cat = firmwareCatalog();
+      const ids = (body.deviceIds || []).filter((id) => byId.has(id));
+      const results = {};
+      await pool(ids, cfg.batchSize, async (id) => {
+        const dev = byId.get(id);
+        const s = seriesOf(dev.model);
+        const fw = cat[s] ? { ...cat[s] } : null;
+        if (fw && !fw.platform && latest.series[s]) fw.platform = latest.series[s].platform;
+        const r = await withTimeout(sicp.preflight(dev, fw, profile, cfg), cfg.timeoutMs * 6)
+          .catch((e) => ({ checks: [{ key: 'online', label: 'Bereikbaar', ok: false, text: e.message, code: 'NO_REPLY' }], ready: false, at: new Date().toISOString() }));
+        // Firmwarebestand voor een ander apparaat telt ook als blokkade.
+        if (fw && otaMismatch(s, fw)) {
+          r.checks.push({ key: 'ota', label: 'Firmware voor dit model', ok: false, text: `bestand is voor ${otaMismatch(s, fw)}`, code: 'FW_OTA_MISMATCH' });
+          r.ready = false;
+        }
+        dev.preflight = r;
+        results[id] = r;
+      });
+      return send(res, 200, { results });
     }
     if (req.method === 'POST' && (p === '/api/firmware/download' || p === '/api/firmware/reload')) {
       if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });

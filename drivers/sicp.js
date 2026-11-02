@@ -405,4 +405,56 @@ function screenshot(dev, cfg) {
   return null;
 }
 
-module.exports = { execute, screenshot, buildPacket };
+// Controle vóór een firmware-upgrade, zonder iets te wijzigen (alleen uitlezen + FTP-login).
+// Geeft per punt ok/niet-ok met uitleg, en of het scherm klaar is voor de upgrade.
+async function preflight(dev, fw, profile, cfg) {
+  const checks = [];
+  const add = (key, label, ok, text, code) => checks.push({ key, label, ok, text, code: ok ? null : code });
+  const done = (extra = {}) => ({ checks, ready: checks.every((c) => c.ok) && !extra.current, at: new Date().toISOString(), ...extra });
+
+  // 1. Bereikbaar en aan
+  let power = null;
+  try {
+    const c = command(profile, cfg, 'powerGet');
+    const d = await send(dev, cfg, [hex(c.code)]);
+    if (d[0] === hex(c.code)) { READERS.powerGet(dev, d.slice(1), profile); power = dev.power; }
+  } catch { /* geen antwoord */ }
+  add('online', 'Bereikbaar', !!power, power ? 'reageert via SICP' : 'geen reactie via SICP', 'NO_REPLY');
+  if (!power) return done();
+  add('power', 'Scherm aan', power === 'aan', power === 'aan' ? 'aan' : 'staat uit (standby)', 'FW_SCREEN_OFF');
+
+  // 2. Juist apparaat op dit IP
+  const id = await readIdentity(dev, cfg);
+  const norm = (v) => String(v || '').replace(/\/\d+$/, '').trim().toUpperCase();
+  const idOk = !(id.serial && dev.serial && norm(id.serial) !== norm(dev.serial)) && !(id.model && dev.model && norm(id.model) !== norm(dev.model));
+  add('identity', 'Juist apparaat', idOk, idOk ? `serienr ${id.serial || '?'}` : `op dit IP: ${id.model || '?'} (${id.serial || '?'})`, 'IDENTITY_MISMATCH');
+  if (!idOk) return done();
+
+  // 3. Versie, Mode 4, platform
+  const current = await readFirmware(dev, profile, cfg, 0x03).catch(() => null);
+  if (current) dev.fwVersion = current;
+  add('version', 'Versie uitleesbaar', !!current, current || 'niet uitleesbaar via SICP', 'FW_VERSION_UNREADABLE');
+  const already = !!(current && fw && sameVersion(current, fw.version));
+  const ps = await read(dev, profile, cfg, 'powerSaveGet');
+  add('mode4', 'Power save Mode 4', ps && dev.powerSaveMode === '4', ps ? `Mode ${dev.powerSaveMode}` : 'niet uitleesbaar', 'FW_NOT_MODE4');
+  const live = await readPlatform(dev, cfg).catch(() => null);
+  if (live) dev.platformLive = live;
+  const platOk = !!(fw && fw.platform && live && samePlatform(live, fw.platform));
+  add('platform', 'Platform past', platOk, live ? `${live}${fw && fw.platform ? ` / firmware: ${fw.platform}` : ''}` : 'niet uitleesbaar', 'FW_PLATFORM_MISMATCH');
+
+  // 4. Firmware klaar en FTP-login (de enige handeling op het scherm: inloggen en weer uitloggen)
+  add('file', 'Firmware klaargezet', !!fw, fw ? `${fw.version}` : 'geen firmware in de map', 'FW_NO_FILE');
+  const login = cfg.displayFtp && cfg.displayFtp.user ? cfg.displayFtp : null;
+  if (!login || !login.password) add('ftp', 'FTP-login', false, 'geen FTP-account in config.local.json', 'FW_NO_FTP_ACCOUNT');
+  else {
+    try {
+      await ftp.check(dev.ip, { port: login.port || 2121, user: login.user, password: login.password });
+      add('ftp', 'FTP-login', true, 'gelukt');
+    } catch (e) {
+      add('ftp', 'FTP-login', false, e.message, /530|login/i.test(e.message) ? 'FTP_LOGIN' : 'FTP_UNREACHABLE');
+    }
+  }
+  return done({ current: already, version: current });
+}
+
+module.exports = { execute, screenshot, buildPacket, preflight };

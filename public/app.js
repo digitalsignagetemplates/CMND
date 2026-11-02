@@ -81,48 +81,241 @@ const link = (href, text) => (href ? `<a href="${esc(href)}" target="_blank" rel
 
 const mb = (n) => `${Math.round(n / 1048576)} MB`;
 
-async function renderFirmware() {
-  const fw = await api('/api/firmware').catch((e) => ({ series: {}, kbError: e.message }));
-  const cards = Object.entries(fw.series)
-    .sort((a, b) => b[1].inUse - a[1].inUse)
-    .map(([s, v]) => {
-      const l = v.latest;
-      const dl = v.download;
-      const lines = [];
-      lines.push(`<div class="row"><strong>${esc(s)}</strong><span class="muted">${v.inUse} scherm${v.inUse === 1 ? '' : 'en'}</span></div>`);
-      if (!l) lines.push(`<span class="muted">${esc(v.kbError || 'Niet gevonden in de PPDS-kennisbank')}</span>`);
-      else {
-        lines.push(`<span>Nieuwste Android: <strong>${esc(l.version || '?')}</strong>${l.scaler ? ` <span class="muted">· scaler v${esc(l.scaler)}</span>` : ''}</span>`);
-        if (l.platform) lines.push(`<span class="muted">Platform: ${esc(l.platform)}</span>`);
-        if (!v.upgradable) {
-          lines.push(`<span class="warn-text">Geen los update.zip in de kennisbank (${esc(l.file || 'onbekend')}): handmatig bijwerken volgens de instructies van PPDS.</span>`);
-        }
-        lines.push(`<span class="small">${[link(l.page, 'PPDS-pagina'), link(l.releaseNotes, 'Release notes'), link(l.instructions, 'Instructies'), link(l.manual, 'Firmware (handmatig)')].filter(Boolean).join(' · ')}</span>`);
-      }
-      if (v.ready) {
-        lines.push(`<span class="ok-text">Klaargezet: ${esc(v.ready.version)} (${mb(v.ready.size)})</span>`);
-        if (v.ready.mismatch) lines.push(`<span class="bad-text"><strong>Niet bevestigd:</strong> het bestand is volgens zichzelf voor "${esc(v.ready.mismatch)}", niet herkenbaar als ${esc(s)}. Upgrade is geblokkeerd. Laat PPDS bevestigen dat dit de juiste firmware is (dan: otaAliases in config.json) of vraag de juiste firmware op.</span>`);
-        else if (v.ready.ota && (v.ready.ota.device || v.ready.ota.build)) lines.push(`<span class="muted">Volgens het bestand bedoeld voor: ${esc(v.ready.ota.device || '?')}${v.ready.ota.build ? ` · ${esc(v.ready.ota.build)}` : ''}</span>`);
-        else lines.push('<span class="warn-text">Het bestand zegt niet voor welk apparaat het is; controleer dit zelf.</span>');
-      }
-      if (dl && dl.state === 'bezig') {
-        lines.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted">Downloaden… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);
-      } else if (dl && dl.state === 'mislukt') lines.push(`<span class="bad-text">Download mislukt: ${esc(dl.error)}</span>`);
-      if (l && v.upgradable && !(dl && dl.state === 'bezig')) {
-        const label = v.ready && v.ready.version === l.version ? 'Opnieuw ophalen' : 'Ophalen';
-        lines.push(`<div class="row"><span></span><button class="ghost" data-fetch="${esc(s)}">${label}</button></div>`);
-      }
-      return `<div class="fw-card">${lines.join('')}</div>`;
-    });
-  $('#fwInfo').innerHTML = (fw.kbError ? `<p class="note warn">${esc(fw.kbError)}</p>` : '') + (cards.join('') || '<p class="muted">Geen series gevonden.</p>');
-  return Object.values(fw.series).some((v) => v.download && v.download.state === 'bezig');
+// ---- Firmware-updates: overzicht per serie, controle per scherm, start en voortgang ----
+
+let fwData = { series: {} };
+let fwSeriesSel = null;
+const fwSel = new Set();
+let fwChecking = false;
+
+const CHECK_ORDER = [['online', 'Bereikbaar'], ['power', 'Aan'], ['identity', 'Apparaat'], ['version', 'Versie'], ['mode4', 'Mode 4'], ['platform', 'Platform'], ['file', 'Bestand'], ['ftp', 'FTP'], ['ota', 'Bestand voor model']];
+const seriesOf = (m) => ((String(m || '').match(/BDL(\d{4}[A-Z])/i) || [])[1] || '').toUpperCase();
+const normV = (v) => String(v || '').trim().replace(/^v/i, '').replace(/^FB/i, '').toUpperCase();
+
+// Lopende of laatste firmware-actie per scherm (voor de voortgang in de tabel).
+function fwTargetFor(id) {
+  for (const a of actions) {
+    if (a.type !== 'firmware') continue;
+    const t = a.targets.find((x) => x.deviceId === id);
+    if (t) return { a, t };
+  }
+  return null;
 }
 
-let fwTimer = null;
-async function refreshFirmware() {
-  clearTimeout(fwTimer);
-  const busy = await renderFirmware();
-  if (tab === 'firmware') fwTimer = setTimeout(refreshFirmware, busy ? 1500 : 10000);
+function fwStatus(d, latest) {
+  const cur = d.fwVersion || d.firmware;
+  const run = fwTargetFor(d.id);
+  if (run && !run.t.doneAt) return { cls: 'now', text: 'Bezig' };
+  if (latest && cur && normV(cur) === normV(latest)) return { cls: 'done', text: 'Actueel' };
+  if (run && run.t.status === 'mislukt') return { cls: 'fail', text: 'Mislukt' };
+  if (d.preflight && d.preflight.ready) return { cls: 'done', text: 'Klaar voor update' };
+  if (d.preflight && !d.preflight.ready) return { cls: 'fail', text: 'Niet klaar' };
+  return { cls: '', text: latest && cur ? 'Update nodig' : 'Onbekend' };
+}
+
+async function loadFirmware() {
+  fwData = await api('/api/firmware').catch((e) => ({ series: {}, kbError: e.message }));
+  renderFwSection();
+  return Object.values(fwData.series).some((v) => v.download && v.download.state === 'bezig');
+}
+
+function renderFwSection() {
+  const entries = Object.entries(fwData.series).sort((a, b) => b[1].inUse - a[1].inUse);
+  if (!fwSeriesSel && entries.length) fwSeriesSel = (entries.find(([, v]) => v.upgradable) || entries[0])[0];
+  $('#fwSeries').innerHTML = (fwData.kbError ? `<p class="note warn">${esc(fwData.kbError)}</p>` : '') + entries.map(([s, v]) => {
+    const devs = devices.filter((d) => seriesOf(d.model) === s);
+    const need = v.latest ? devs.filter((d) => (d.fwVersion || d.firmware) && normV(d.fwVersion || d.firmware) !== normV(v.latest.version)).length : 0;
+    const state = !v.latest ? 'niet in kennisbank' : !v.upgradable ? 'handmatig (PPDS-instructie)' : v.ready && !v.ready.mismatch && normV(v.ready.version) === normV(v.latest.version) ? 'firmware klaar' : v.ready && v.ready.mismatch ? 'bestand geblokkeerd' : 'nog ophalen';
+    return `<button class="fw-tile ${s === fwSeriesSel ? 'sel' : ''}" data-series="${esc(s)}">
+      <span class="fw-tile-name">${esc(s)}</span>
+      <span class="small">${devs.length} scherm${devs.length === 1 ? '' : 'en'} · <strong>${need}</strong> update nodig</span>
+      <span class="small muted">nieuwste ${esc((v.latest && v.latest.version) || '?')} · ${esc(state)}</span>
+    </button>`;
+  }).join('');
+  renderFwPanel();
+}
+
+function renderFwPanel() {
+  const s = fwSeriesSel;
+  const v = fwData.series[s];
+  if (!v) { $('#fwPanel').innerHTML = ''; return; }
+  const l = v.latest;
+  const dl = v.download;
+  const devs = devices.filter((d) => seriesOf(d.model) === s);
+  for (const id of [...fwSel]) if (!devs.some((d) => d.id === id)) fwSel.delete(id);
+
+  // 1. Firmware van deze serie
+  const info = [];
+  if (!l) info.push(`<span class="muted">${esc(v.kbError || 'Niet gevonden in de PPDS-kennisbank')}</span>`);
+  else {
+    info.push(`<span>Nieuwste Android: <strong>${esc(l.version || '?')}</strong>${l.scaler ? ` <span class="muted">· scaler v${esc(l.scaler)} (niet via de tool)</span>` : ''} <span class="muted">· platform ${esc(l.platform || '?')}</span></span>`);
+    info.push(`<span class="small">${[link(l.page, 'PPDS-pagina'), link(l.releaseNotes, 'Release notes'), link(l.instructions, 'Instructies')].filter(Boolean).join(' · ')}</span>`);
+    if (!v.upgradable) info.push(`<span class="warn-text">PPDS levert voor deze serie geen los update.zip (${esc(l.file || '?')}): bijwerken via USB volgens de instructies.</span>`);
+  }
+  if (v.ready) {
+    if (v.ready.mismatch) info.push(`<span class="bad-text"><strong>Geblokkeerd:</strong> het klaargezette bestand is volgens zichzelf voor "${esc(v.ready.mismatch)}". Laat PPDS bevestigen (otaAliases) of haal opnieuw op.</span>`);
+    else info.push(`<span class="ok-text">Klaargezet: ${esc(v.ready.version)} (${mb(v.ready.size)})${v.ready.ota && v.ready.ota.device ? ` · voor ${esc(v.ready.ota.device)}` : ''}</span>`);
+  }
+  if (dl && dl.state === 'bezig') info.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted small">Ophalen… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);
+  else if (dl && dl.state === 'mislukt') info.push(`<span class="bad-text">Ophalen mislukt: ${esc(dl.error)}</span>`);
+  const canFetch = l && v.upgradable && !(dl && dl.state === 'bezig');
+  const fetchLabel = v.ready && normV(v.ready.version) === normV(l && l.version) ? 'Opnieuw ophalen' : 'Firmware ophalen';
+
+  // 2. Voortgang van een lopende update voor deze serie
+  const running = actions.find((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((t) => devs.some((d) => d.id === t.deviceId)));
+  let progress = '';
+  if (running) {
+    const tot = running.targets.length;
+    const ok = running.targets.filter((t) => t.status === 'bevestigd').length;
+    const bad = running.targets.filter((t) => ['mislukt', 'geen_reactie'].includes(t.status)).length;
+    const busy = running.targets.filter((t) => t.status === 'verstuurd').length;
+    progress = `<div class="fw-progress"><strong>Update loopt:</strong> ${ok} van ${tot} klaar · ${busy} bezig · ${bad} mislukt · ${tot - ok - bad - busy} in de wachtrij
+      <progress max="${tot}" value="${ok + bad}"></progress></div>`;
+  }
+
+  // 3. Schermen met controlelijst
+  const rows = devs.map((d) => {
+    const st = fwStatus(d, l && l.version);
+    const pf = d.preflight;
+    const checks = pf ? CHECK_ORDER.map(([k, label]) => {
+      const c = pf.checks.find((x) => x.key === k);
+      if (!c) return '';
+      const e = c.code ? errInfo(c.code) : null;
+      return `<span class="ck ${c.ok ? 'ok' : 'bad'}" title="${esc(`${label}: ${c.text}${e && !c.ok ? `\n${e.fix}` : ''}`)}">${c.ok ? '✓' : '✗'} ${esc(label)}</span>`;
+    }).join('') : '<span class="muted small">nog niet gecontroleerd</span>';
+    // Bij een actueel scherm doen de controles er niet toe; geen foutmelding tonen.
+    const firstBad = st.text !== 'Actueel' && pf && pf.checks.find((c) => !c.ok);
+    const why = firstBad ? `<div class="small bad-text">${esc((errInfo(firstBad.code) || {}).title || firstBad.label)}: ${esc(firstBad.text)}</div>` : '';
+    const run = fwTargetFor(d.id);
+    const phase = run && (run.t.phase || run.t.status !== 'bevestigd') ? `${phaseBar(run.t)}${!run.t.doneAt ? `<div class="small muted">${esc(run.t.detail || '')}</div>` : ''}` : '';
+    const disabled = !!(run && !run.t.doneAt);
+    return `<tr class="${fwSel.has(d.id) ? 'sel' : ''}">
+      <td><input type="checkbox" data-fwsel="${esc(d.id)}" ${fwSel.has(d.id) ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
+      <td><div class="dev-name">${esc(d.name === d.ip ? shortModel(d.model) : d.name)}</div><div class="dev-sub">${esc(d.ip)}</div></td>
+      <td>${esc(d.fwVersion || d.firmware || '–')} <span class="muted">→</span> ${esc((l && l.version) || '?')}</td>
+      <td><span class="ph ${st.cls}">${esc(st.text)}</span></td>
+      <td class="wrap"><div class="checks">${checks}</div>${why}${phase}</td>
+    </tr>`;
+  }).join('');
+
+  const selDevs = devs.filter((d) => fwSel.has(d.id));
+  const readySel = selDevs.filter((d) => d.preflight && d.preflight.ready);
+  const startable = v.upgradable && v.ready && !v.ready.mismatch && readySel.length && !running;
+  $('#fwPanel').innerHTML = `
+    <div class="fw-info">${info.join('')}${canFetch ? `<div><button class="ghost" data-fetch="${esc(s)}">${fetchLabel}</button></div>` : ''}</div>
+    ${progress}
+    <div class="fw-toolbar">
+      <label class="switch"><input type="checkbox" id="fwSelAll" ${devs.length && selDevs.length === devs.length ? 'checked' : ''}><span>Alles</span></label>
+      <button class="ghost" id="fwCheck" ${fwChecking || !selDevs.length ? 'disabled' : ''}>${fwChecking ? 'Controleren…' : `Controleer geselecteerde (${selDevs.length})`}</button>
+      <button class="ghost" id="fwSelReady">Selecteer alle klare</button>
+      <button class="ghost" id="fwMode4" ${!selDevs.length ? 'disabled' : ''} title="Zet power save op Mode 4 (PPDS-voorschrift voor firmware-updates)">Zet Mode 4 op geselecteerde</button>
+      <span class="spacer"></span>
+      <button class="primary" id="fwStart" ${startable ? '' : 'disabled'} title="${startable ? '' : 'Selecteer schermen die "Klaar voor update" zijn, met klaargezette firmware'}">Start update (${readySel.length})</button>
+    </div>
+    <div class="tablewrap"><table class="fw-table">
+      <thead><tr><th class="w-chk"></th><th>Scherm</th><th>Versie</th><th>Status</th><th>Controle vóór de update</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="empty">Geen schermen van deze serie</td></tr>'}</tbody>
+    </table></div>
+    ${selDevs.length && selDevs.length !== readySel.length ? `<p class="muted small">${selDevs.length - readySel.length} geselecteerd scherm(en) zijn niet (gecontroleerd) klaar; die worden niet meegenomen.</p>` : ''}`;
+}
+
+async function fwPreflight(ids) {
+  fwChecking = true; renderFwPanel();
+  try {
+    await api('/api/firmware/preflight', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceIds: ids }) });
+    await loadDevices();
+  } catch (e) { alert(`Controle mislukt: ${e.message}`); }
+  fwChecking = false; renderFwPanel();
+}
+
+function openFwDialog() {
+  const v = fwData.series[fwSeriesSel];
+  const devs = devices.filter((d) => fwSel.has(d.id) && d.preflight && d.preflight.ready);
+  if (!devs.length) return;
+  const from = {};
+  for (const d of devs) { const c = d.fwVersion || d.firmware || '?'; from[c] = (from[c] || 0) + 1; }
+  const updateMin = 8; // installeren + herstart (schatting)
+  const uploadMin = Math.ceil((v.ready.size / 1048576) / 4 / 60); // ~4 MB/s via LAN
+  const est = (n) => Math.ceil((devs.length / n) * (uploadMin + updateMin));
+  const draw = () => {
+    const n = Number($('#fwConc').value);
+    $('#fwDlgBody').innerHTML = `
+      <table class="kv">
+        <tr><th>Serie</th><td>${esc(fwSeriesSel)}</td></tr>
+        <tr><th>Schermen</th><td>${devs.length}: ${esc(devs.map((d) => d.ip).join(', '))}</td></tr>
+        <tr><th>Versie</th><td>${Object.entries(from).map(([k, c]) => `${esc(k)} (${c}×)`).join(', ')} → <strong>${esc(v.ready.version)}</strong></td></tr>
+        <tr><th>Duur (schatting)</th><td>ongeveer ${est(n)} minuten (${uploadMin} min upload + ~${updateMin} min installeren per scherm, ${n} tegelijk)</td></tr>
+      </table>
+      <p class="note warn">Schermen herstarten tijdens de update en tonen dan geen content. Haal de stroom er niet af. Doe dit bij voorkeur buiten openingstijd.</p>`;
+  };
+  $('#fwConc').onchange = draw;
+  $('#fwConfirmTxt').value = '';
+  $('#fwDlgStart').disabled = true;
+  draw();
+  $('#fwDlg').showModal();
+}
+
+async function startFwUpdate() {
+  const devs = devices.filter((d) => fwSel.has(d.id) && d.preflight && d.preflight.ready);
+  try {
+    const r = await api('/api/actions', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'firmware', params: { confirm: 'UPGRADE', concurrency: Number($('#fwConc').value) }, deviceIds: devs.map((d) => d.id) }),
+    });
+    $('#fwDlg').close();
+    fwSel.clear();
+    await loadActions();
+    renderFwPanel();
+    if (r.action.skipped.length) alert(`${r.action.skipped.length} scherm(en) overgeslagen; zie Acties voor de reden.`);
+  } catch (e) { alert(e.message); }
+}
+
+function initFirmwareUi() {
+  const post = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+  $('#fwSeries').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-series]');
+    if (!b) return;
+    fwSeriesSel = b.dataset.series; fwSel.clear(); renderFwSection();
+  });
+  $('#fwPanel').addEventListener('change', (e) => {
+    const id = e.target.dataset.fwsel;
+    if (id) { e.target.checked ? fwSel.add(id) : fwSel.delete(id); renderFwPanel(); }
+    if (e.target.id === 'fwSelAll') {
+      const devs = devices.filter((d) => seriesOf(d.model) === fwSeriesSel);
+      for (const d of devs) e.target.checked ? fwSel.add(d.id) : fwSel.delete(d.id);
+      renderFwPanel();
+    }
+  });
+  $('#fwPanel').addEventListener('click', async (e) => {
+    const t = e.target;
+    if (t.dataset.fetch) {
+      if (!confirm(`Firmware voor serie ${t.dataset.fetch} ophalen via de PPDS-kennisbank? Dit kan ruim 1 GB zijn.`)) return;
+      t.disabled = true;
+      try { await post('/api/firmware/download', { series: t.dataset.fetch }); } catch (err) { alert(err.message); }
+      loadFirmware();
+    }
+    if (t.id === 'fwCheck') fwPreflight([...fwSel]);
+    if (t.id === 'fwSelReady') {
+      fwSel.clear();
+      for (const d of devices.filter((x) => seriesOf(x.model) === fwSeriesSel)) if (d.preflight && d.preflight.ready) fwSel.add(d.id);
+      renderFwPanel();
+    }
+    if (t.id === 'fwMode4') {
+      if (!confirm(`Power save op Mode 4 zetten voor ${fwSel.size} scherm(en)? (PPDS-voorschrift voor firmware-updates)`)) return;
+      try {
+        await post('/api/actions', { type: 'powerSave', params: { mode: '4' }, deviceIds: [...fwSel] });
+        await loadActions();
+        alert('Mode 4 wordt ingesteld (zie Acties). Controleer de schermen daarna opnieuw.');
+      } catch (err) { alert(err.message); }
+    }
+    if (t.id === 'fwStart') openFwDialog();
+  });
+  $('#fwConfirmTxt').addEventListener('input', (e) => { $('#fwDlgStart').disabled = e.target.value.trim() !== 'UPGRADE'; });
+  $('#fwDlgStart').onclick = startFwUpdate;
+  $('#fwDlgClose').onclick = () => $('#fwDlg').close();
+  $('#fwReload').onclick = async () => { await post('/api/firmware/reload').catch((err) => alert(err.message)); await loadFirmware(); loadDevices(); };
+  const tick = async () => { const busy = await loadFirmware(); setTimeout(tick, busy ? 1500 : 10000); };
+  tick();
 }
 
 // ---------- schermen ----------
@@ -165,8 +358,7 @@ function renderDevices() {
 
 function updateSelection() {
   $('#selCount').textContent = `${selected.size} geselecteerd`;
-  const verb = tab === 'firmware' ? 'FW update uitvoeren' : 'Uitvoeren';
-  $('#run').textContent = selected.size ? `${verb} op ${selected.size} scherm${selected.size === 1 ? '' : 'en'}` : 'Selecteer schermen';
+  $('#run').textContent = selected.size ? `Uitvoeren op ${selected.size} scherm${selected.size === 1 ? '' : 'en'}` : 'Selecteer schermen';
   $('#run').disabled = !selected.size;
 }
 
@@ -178,6 +370,7 @@ async function loadDevices() {
   $('#synced').textContent = `Bijgewerkt ${new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}`;
   renderDevices();
   renderKpis();
+  if (fwSeriesSel) renderFwSection(); // versies en controles in het firmwareoverzicht bijwerken
 }
 
 // ---------- bulkacties ----------
@@ -235,7 +428,6 @@ function collectParams() {
       return params;
     }
     case 'bootSource': return { source: $('#bootSource').value };
-    case 'firmware': return { confirm: $('#fwConfirm').value.trim() };
     case 'schedule': return {
       entries: $$('.schedrow').map((r) => ({
         days: $$('.days input:checked', r).map((c) => Number(c.value)),
@@ -260,11 +452,6 @@ function confirmText(params) {
       : `Opstartbron → ${sourceLabel(params.source)}\n(geldt pas bij de volgende keer aanzetten)`;
   }
   if (tab === 'schedule') what = `Powerschema vervangen (${params.entries.length} regel(s))`;
-  if (tab === 'firmware') {
-    const sel = devices.filter((d) => selected.has(d.id));
-    what = 'FIRMWARE-UPGRADE\n' + sel.map((d) => `${d.name}: ${d.fwVersion || '?'} → ${d.fwAvailable || 'geen firmware in map'}`).join('\n')
-      + '\n\nDe schermen herstarten en zijn 10–30 minuten niet beschikbaar.';
-  }
   return `${what}\n\nUitvoeren op ${selected.size} scherm(en)?`;
 }
 
@@ -391,6 +578,8 @@ async function loadActions() {
   }).join('') || '<p class="muted">Nog geen acties uitgevoerd.</p>';
   renderKpis();
   if (actions.some((a) => !a.finishedAt)) loadDevices();
+  // Voortgang van een lopende firmware-update live bijwerken in het overzicht.
+  if (fwSeriesSel && actions.some((a) => a.type === 'firmware' && !a.finishedAt)) renderFwPanel();
 }
 
 // ---------- screenshot ----------
@@ -453,26 +642,17 @@ async function init() {
     if (b) showTarget(b.dataset.action, b.dataset.dev);
   });
   $$('.segmented button').forEach((b) => b.onclick = async () => {
+    if (b.dataset.goto) { document.getElementById(b.dataset.goto).scrollIntoView({ behavior: 'smooth' }); return; }
     tab = b.dataset.tab;
-    if (tab === 'firmware') refreshFirmware();
     updateSelection();
     $$('.segmented button').forEach((x) => x.classList.toggle('active', x === b));
     $$('.tab').forEach((p) => p.classList.toggle('hidden', p.dataset.panel !== tab));
   });
   $('#run').onclick = run;
-  const post = (url, body) => api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-  $('#fwInfo').addEventListener('click', async (e) => {
-    const s = e.target.dataset.fetch;
-    if (!s) return;
-    if (!confirm(`Firmware voor serie ${s} downloaden via de PPDS-kennisbank? Dit kan enkele GB zijn.`)) return;
-    e.target.disabled = true;
-    try { await post('/api/firmware/download', { series: s }); } catch (err) { alert(err.message); }
-    refreshFirmware();
-  });
-  $('#fwReload').onclick = async () => { await post('/api/firmware/reload').catch((err) => alert(err.message)); refreshFirmware(); loadDevices(); };
 
   await loadDevices();
   await loadActions();
+  initFirmwareUi();
   setInterval(loadActions, 2000);
   setInterval(loadDevices, 15000);
 }
