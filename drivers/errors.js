@@ -37,6 +37,15 @@ const CATALOG = {
   FW_TIMEOUT: { title: 'Scherm na upgrade niet terug', cause: 'Na het starten van de upgrade reageerde het scherm niet meer binnen de wachttijd.', fix: 'Controleer het scherm ter plekke. Een upgrade kan langer duren; lees daarna de status opnieuw uit.' },
   FW_WRONG_VERSION: { title: 'Na upgrade een andere versie', cause: 'Het scherm is herstart, maar meldt niet de verwachte firmwareversie.', fix: 'Lees de versie opnieuw uit. Klopt het niet, controleer dan het firmwarebestand en de release notes van PPDS.' },
 
+  // signageOS
+  SOS_NO_TOKEN: { title: 'signageOS niet ingesteld', cause: 'Er staat geen signageOS-token in config.local.json.', fix: 'Maak in signageOS Box (Organizations → API tokens) een token aan en zet tokenId en tokenSecret onder "signageos" in config.local.json. Herstart daarna de tool.' },
+  SOS_AUTH: { title: 'signageOS weigert het token', cause: 'Het token klopt niet, is ingetrokken of hoort bij een andere organisatie.', fix: 'Controleer tokenId en tokenSecret in config.local.json, of maak een nieuw token aan in signageOS Box.' },
+  SOS_NO_ENTITLEMENT: { title: 'Niet in het signageOS-abonnement', cause: 'signageOS antwoordde "Payment Required": deze functie (bijv. firmware-beheer) zit niet in het abonnement van dit scherm.', fix: 'Vraag signageOS om de juiste licentie, of gebruik de route via FTP/SICP.' },
+  SOS_NOT_FOUND: { title: 'Niet gevonden in signageOS', cause: 'Het scherm of de firmware bestaat (niet meer) in de signageOS-organisatie van dit token.', fix: 'Klik op "signageOS vernieuwen" en controleer of het scherm in signageOS Box staat.' },
+  SOS_RATE: { title: 'signageOS: te veel verzoeken', cause: 'De API van signageOS beperkt tijdelijk het aantal verzoeken.', fix: 'Wacht een minuut en probeer opnieuw; kies bij bulk-upgrades een lagere gelijktijdigheid.' },
+  SOS_TIMEOUT: { title: 'signageOS reageert niet op tijd', cause: 'Het scherm leverde via signageOS niet op tijd een resultaat (bijv. screenshot), meestal omdat het offline of in standby is.', fix: 'Controleer in signageOS Box of het scherm online is.' },
+  SOS_ERROR: { title: 'Fout bij signageOS', cause: 'De signageOS-API gaf een onverwachte fout.', fix: 'Bekijk de technische melding; controleer de internetverbinding van deze pc.' },
+
   UNKNOWN: { title: 'Onbekende fout', cause: 'Er ging iets mis dat de tool niet kon herkennen.', fix: 'Bekijk de technische melding hieronder.' },
 };
 

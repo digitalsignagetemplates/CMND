@@ -423,7 +423,8 @@ function screenshot(dev, cfg) {
 
 // Controle vóór een firmware-upgrade, zonder iets te wijzigen (alleen uitlezen + FTP-login).
 // Geeft per punt ok/niet-ok met uitleg, en of het scherm klaar is voor de upgrade.
-async function preflight(dev, fw, profile, cfg) {
+// opts.via = 'signageos': geen update.zip en FTP nodig; signageOS levert de firmware zelf.
+async function preflight(dev, fw, profile, cfg, opts = {}) {
   const checks = [];
   const add = (key, label, ok, text, code) => checks.push({ key, label, ok, text, code: ok ? null : code });
   const done = (extra = {}) => ({ checks, ready: checks.every((c) => c.ok) && !extra.current, at: new Date().toISOString(), ...extra });
@@ -457,6 +458,8 @@ async function preflight(dev, fw, profile, cfg) {
   if (live) dev.platformLive = live;
   const platOk = !!(fw && fw.platform && live && samePlatform(live, fw.platform));
   add('platform', 'Platform past', platOk, live ? `${live}${fw && fw.platform ? ` / firmware: ${fw.platform}` : ''}` : 'niet uitleesbaar', 'FW_PLATFORM_MISMATCH');
+
+  if (opts.via === 'signageos') return done({ current: already, version: current });
 
   // 4. Firmware klaar en FTP-login (de enige handeling op het scherm: inloggen en weer uitloggen)
   add('file', 'Firmware klaargezet', !!fw, fw ? `${fw.version}` : 'geen firmware in de map', 'FW_NO_FILE');

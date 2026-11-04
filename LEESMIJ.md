@@ -79,6 +79,20 @@ Een scherm heeft twee firmwaredelen:
 
 Commando's die niet getest en niet gedocumenteerd zijn, worden geweigerd, tenzij `sicp.allowUnverified` op `true` staat.
 
+### signageOS (optioneel)
+Draait er signageOS op de schermen, dan kan de tool firmware en screenshots via signageOS doen. Er is dan geen FTP-server op het scherm en geen update.zip nodig.
+1. Maak in signageOS Box onder **Organizations → (organisatie) → API tokens** een token aan.
+2. Zet het in `config.local.json` (dit bestand gaat niet mee naar GitHub):
+   ```json
+   "signageos": { "tokenId": "...", "tokenSecret": "..." }
+   ```
+3. Herstart de tool. Schermen worden aan signageOS gekoppeld op **serienummer** (ververst elke 5 minuten).
+
+Wat er dan verandert:
+- **Firmware:** in het firmware-overzicht staat per serie hoeveel schermen gekoppeld zijn. Met **Firmware zoeken in signageOS** kies je de firmware uit de signageOS-catalogus die bij de nieuwste PPDS-versie hoort. Past er precies één bij het model, dan kiest de tool die zelf. Gekoppelde schermen worden daarna via signageOS bijgewerkt ("via signageOS" in de tabel). De rest gaat via FTP + SICP. De voorcontrole (bereikbaar, juist apparaat, Mode 4, platform) blijft via SICP.
+- **Screenshots:** gekoppelde schermen leveren een live screenshot via signageOS. Lukt dat niet, dan toont de tool de laatste screenshot uit Control.
+- Zonder token werkt alles zoals voorheen. Fouten van signageOS hebben eigen codes (`SOS_*`), bijvoorbeeld een ongeldig token of een functie die niet in het abonnement zit.
+
 ## Foutmeldingen
 Elke mislukte of overgeslagen actie krijgt een vaste foutcode, met uitleg in gewone taal: wat er misging, waarom, en wat je eraan doet. De teksten staan in `drivers/errors.js`.
 - **Per actie** staan de problemen gegroepeerd, bijvoorbeeld "12× Geheugen van het scherm vol", met de oplossing en de schermen erbij.

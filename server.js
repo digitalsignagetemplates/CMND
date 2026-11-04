@@ -11,6 +11,7 @@ const control = require('./drivers/control');
 const onelink = require('./drivers/onelink'); // alleen nog voor het lezen van OTA-metadata uit update.zip
 const ppdskb = require('./drivers/ppdskb');
 const errors = require('./drivers/errors');
+const sos = require('./drivers/signageos');
 const https = require('https');
 const os = require('os');
 
@@ -82,6 +83,7 @@ async function syncControl() {
     });
     byId = new Map(devices.map((d) => [d.id, d]));
     controlSettings = await control.loadSettings(cfg.db).catch(() => ({}));
+    await syncSignageOS();
     controlError = null;
     // Status live uitlezen (alleen-lezen SICP-queries) bij ondersteunde schermen.
     // Ook schermen met een identiteitsprobleem blijven we (alleen-lezend) controleren.
@@ -111,6 +113,67 @@ if (cfg.mode === 'demo') {
   }));
 }
 if (cfg.mode !== 'control') byId = new Map(devices.map((d) => [d.id, d]));
+
+// ---------- signageOS ----------
+// Koppeling per scherm op serienummer; eens per 5 minuten ververst (de apparatenlijst verandert zelden).
+const sosState = { enabled: sos.enabled(cfg), error: null, checkedAt: 0, linked: 0, total: 0 };
+const SOS_SEL_FILE = path.join(DATA_DIR, 'signageos-firmware.json');
+let sosFirmwareSel = {};
+try { sosFirmwareSel = JSON.parse(fs.readFileSync(SOS_SEL_FILE, 'utf8')); } catch { /* nog geen keuze */ }
+
+async function syncSignageOS(force = false) {
+  if (!sosState.enabled) return;
+  if (!force && Date.now() - sosState.checkedAt < 5 * 60000) return;
+  sosState.checkedAt = Date.now();
+  try {
+    const bySerial = await sos.devicesBySerial(cfg);
+    sosState.total = bySerial.size;
+    let linked = 0;
+    for (const d of devices) {
+      const s = bySerial.get(String(d.serial || '').replace(/\/\d+$/, '').trim().toUpperCase());
+      d.sos = s ? { uid: s.uid, name: s.name, model: s.model, firmwareVersion: s.firmwareVersion, applicationType: s.applicationType } : null;
+      if (s) linked++;
+    }
+    sosState.linked = linked;
+    sosState.error = null;
+  } catch (e) {
+    sosState.error = e.message;
+    sosState.errorCode = e.code || 'SOS_ERROR';
+  }
+}
+
+// Gekozen signageOS-firmware per serie; alleen geldig zolang hij bij de nieuwste PPDS-versie hoort.
+function sosChosen(series) {
+  const sel = sosFirmwareSel[series];
+  const l = latest.series[series];
+  return sel && l && sel.version === l.version ? sel : null;
+}
+
+// Route voor een firmware-upgrade: via signageOS als het scherm daar gekoppeld is en er firmware gekozen is.
+const sosRoute = (dev) => !!(sosState.enabled && dev.sos && sosChosen(seriesOf(dev.model)));
+
+function saveSosChoice(series, c) {
+  if (c) sosFirmwareSel[series] = { uid: c.uid, label: c.label, version: latest.series[series].version, at: new Date().toISOString() };
+  else delete sosFirmwareSel[series];
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.writeFileSync(SOS_SEL_FILE, JSON.stringify(sosFirmwareSel, null, 2));
+}
+
+// Kandidaten in de signageOS-catalogus voor de nieuwste PPDS-versie van een serie.
+// Precies één die bij het model past: automatisch kiezen.
+async function sosCandidates(series) {
+  const l = latest.series[series];
+  if (!l || !l.version) return { candidates: [], chosen: null, error: 'Geen nieuwste versie bekend uit de PPDS-kennisbank' };
+  const list = await sos.findFirmware(cfg, { version: l.version, model: `BDL${series}`, brand: 'philips' });
+  const candidates = list.slice(0, 20).map((f) => ({
+    uid: f.uid,
+    label: [f.brand, f.firmwareType, f.manufacturerVersion || f.semverVersion].filter(Boolean).join(' · '),
+    matchesModel: f.matchesModel,
+  }));
+  const fits = candidates.filter((c) => c.matchesModel);
+  if (!sosChosen(series) && fits.length === 1) saveSosChoice(series, fits[0]);
+  return { candidates, chosen: sosChosen(series), version: l.version };
+}
 
 const driver = {
   execute: (dev, type, params) => (cfg.mode === 'demo'
@@ -266,6 +329,7 @@ function firmwareOverview() {
       download: downloads[s] || null,
       // Via de tool alleen met een los update.zip (Android-firmware, SICP 0x20).
       upgradable: !!(l && l.url),
+      sos: sosState.enabled ? { linked: devices.filter((d) => seriesOf(d.model) === s && d.sos).length, chosen: sosChosen(s) } : null,
     };
   }
   return out;
@@ -282,6 +346,7 @@ function publicDevice(d, cat) {
     fwAvailable: ready ? ready.version : null,
     fwLatest: l ? l.version : null,
     fwLatestScaler: l ? l.scaler : null,
+    fwRoute: sosRoute(d) ? 'signageos' : 'ftp',
   };
 }
 
@@ -329,6 +394,31 @@ function persist(action) {
   fs.appendFileSync(AUDIT, JSON.stringify(action) + '\n');
 }
 
+// Firmware via signageOS: dezelfde voorcontrole via SICP (zonder FTP), dan de opdracht aan signageOS.
+async function runSosFirmware(dev, s, step) {
+  const l = latest.series[s];
+  const chosen = sosChosen(s);
+  step('voorcontrole via SICP', 'voorcontrole');
+  const pre = await withTimeout(sicp.preflight(dev, { version: l.version, platform: l.platform }, profile, cfg, { via: 'signageos' }), cfg.timeoutMs * 6)
+    .catch((e) => ({ checks: [{ label: 'Bereikbaar', ok: false, text: e.message, code: 'NO_REPLY' }] }));
+  if (pre.current) return { ok: true, code: 'FW_ALREADY_CURRENT', detail: `draait al ${pre.version}` };
+  const bad = pre.checks.find((c) => !c.ok);
+  if (bad) return { ok: false, code: bad.code, detail: `${bad.label}: ${bad.text}` };
+  try {
+    const r = await sos.upgradeFirmware(cfg, dev.sos.uid, chosen.uid, {
+      expectVersion: l.version,
+      waitMinutes: (cfg.firmwareWaitMinutes || 25) + 15,
+      onStep: step,
+    });
+    if (r.ok) return { ok: true, detail: `bijgewerkt naar ${r.version} (via signageOS)` };
+    return r.version
+      ? { ok: false, code: 'FW_WRONG_VERSION', detail: `signageOS meldt na de wachttijd nog ${r.version}` }
+      : { ok: false, code: 'FW_TIMEOUT', detail: 'signageOS meldde binnen de wachttijd geen nieuwe versie' };
+  } catch (e) {
+    return { ok: false, code: e.code || errors.classify(e.message), detail: e.message };
+  }
+}
+
 async function runTarget(action, t) {
   const dev = byId.get(t.deviceId);
   t.status = 'verstuurd';
@@ -348,6 +438,16 @@ async function runTarget(action, t) {
     let ms = ['power', 'schedule', 'refresh', 'source'].includes(action.type) ? cfg.timeoutMs + 40000 : cfg.timeoutMs * 2;
     if (action.type === 'restart') ms = 240000; // herstart + wachten tot het scherm terug is
     let params = action.params;
+    if (action.type === 'firmware' && sosRoute(dev)) {
+      const res = await runSosFirmware(dev, seriesOf(dev.model), (msg, phase) => { if (!done) { t.detail = msg; if (phase) t.phase = phase; } });
+      done = true;
+      t.status = res.ok ? 'bevestigd' : 'mislukt';
+      t.detail = res.detail;
+      t.code = res.code || null;
+      if (res.ok && res.code !== 'FW_ALREADY_CURRENT') t.phase = 'klaar';
+      t.doneAt = new Date().toISOString();
+      return;
+    }
     if (action.type === 'firmware') {
       ms = ((cfg.firmwareWaitMinutes || 25) + 30) * 60000;
       const s = seriesOf(dev.model);
@@ -414,8 +514,8 @@ function createAction(body, user) {
     if (!dev) continue;
     const s = supportInfo(dev);
     if (!s.supported) skipped.push({ deviceId: id, name: dev.name, code: dev.identityMismatch ? 'IDENTITY_MISMATCH' : 'NAV', reason: s.reason });
-    else if (type === 'firmware' && !fwCat[seriesOf(dev.model)]) skipped.push({ deviceId: id, name: dev.name, code: 'FW_NO_FILE', reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
-    else if (type === 'firmware' && otaMismatch(seriesOf(dev.model), fwCat[seriesOf(dev.model)])) {
+    else if (type === 'firmware' && !sosRoute(dev) && !fwCat[seriesOf(dev.model)]) skipped.push({ deviceId: id, name: dev.name, code: 'FW_NO_FILE', reason: `Geen firmware in map voor serie ${seriesOf(dev.model)}` });
+    else if (type === 'firmware' && !sosRoute(dev) && otaMismatch(seriesOf(dev.model), fwCat[seriesOf(dev.model)])) {
       skipped.push({ deviceId: id, name: dev.name, code: 'FW_OTA_MISMATCH', reason: `Klaargezette firmware is volgens het bestand voor ${otaMismatch(seriesOf(dev.model), fwCat[seriesOf(dev.model)])}, niet voor ${seriesOf(dev.model)}` });
     }
     else if (type === 'firmware' && actions.some((a) => a.type === 'firmware' && !a.finishedAt && a.targets.some((x) => x.deviceId === id))) {
@@ -524,6 +624,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         mode: cfg.mode, minAndroid: cfg.minAndroid, profile, timeoutMs: cfg.timeoutMs,
         controlError, ftp: await ftpCheck(), errors: errors.CATALOG,
+        signageos: { enabled: sosState.enabled, error: sosState.error, linked: sosState.linked, total: sosState.total },
       });
     }
     if (req.method === 'GET' && p === '/api/devices') {
@@ -544,12 +645,16 @@ const server = http.createServer(async (req, res) => {
       await pool(ids, cfg.batchSize, async (id) => {
         const dev = byId.get(id);
         const s = seriesOf(dev.model);
-        const fw = cat[s] ? { ...cat[s] } : null;
-        if (fw && !fw.platform && latest.series[s]) fw.platform = latest.series[s].platform;
-        const r = await withTimeout(sicp.preflight(dev, fw, profile, cfg), cfg.timeoutMs * 6)
+        const viaSos = sosRoute(dev);
+        const l = latest.series[s];
+        const fw = viaSos ? { version: l.version, platform: l.platform } : cat[s] ? { ...cat[s] } : null;
+        if (fw && !fw.platform && l) fw.platform = l.platform;
+        const r = await withTimeout(sicp.preflight(dev, fw, profile, cfg, { via: viaSos ? 'signageos' : 'ftp' }), cfg.timeoutMs * 6)
           .catch((e) => ({ checks: [{ key: 'online', label: 'Bereikbaar', ok: false, text: e.message, code: 'NO_REPLY' }], ready: false, at: new Date().toISOString() }));
         // Firmwarebestand voor een ander apparaat telt ook als blokkade.
-        if (fw && otaMismatch(s, fw)) {
+        r.via = viaSos ? 'signageos' : 'ftp';
+        if (viaSos && r.checks.length > 1) r.checks.push({ key: 'sos', label: 'Via signageOS', ok: true, text: sosChosen(s).label, code: null });
+        if (!viaSos && fw && otaMismatch(s, fw)) {
           r.checks.push({ key: 'ota', label: 'Firmware voor dit model', ok: false, text: `bestand is voor ${otaMismatch(s, fw)}`, code: 'FW_OTA_MISMATCH' });
           r.ready = false;
         }
@@ -568,6 +673,22 @@ const server = http.createServer(async (req, res) => {
       if (upgradeRunning(s)) return send(res, 409, { error: 'Er loopt een firmware-upgrade voor deze serie; ophalen kan na afloop' });
       downloadFirmware(s); // loopt op de achtergrond; voortgang via GET /api/firmware
       return send(res, 202, { ok: true });
+    }
+    if (req.method === 'GET' && p === '/api/signageos/firmware') {
+      if (!sosState.enabled) return send(res, 400, { error: errors.CATALOG.SOS_NO_TOKEN.title, code: 'SOS_NO_TOKEN' });
+      await latestReady;
+      const s = String(url.searchParams.get('series') || '').toUpperCase();
+      try { return send(res, 200, await sosCandidates(s)); } catch (e) { return send(res, 502, { error: e.message, code: e.code || 'SOS_ERROR' }); }
+    }
+    if (req.method === 'POST' && (p === '/api/signageos/firmware-select' || p === '/api/signageos/refresh')) {
+      if (!sameOrigin(req)) return send(res, 403, { error: 'Verzoek niet toegestaan (alleen vanuit de tool zelf)' });
+      const body = await readBody(req);
+      if (!sosState.enabled) return send(res, 400, { error: errors.CATALOG.SOS_NO_TOKEN.title, code: 'SOS_NO_TOKEN' });
+      if (p === '/api/signageos/refresh') { await syncSignageOS(true); return send(res, 200, { ok: !sosState.error, error: sosState.error }); }
+      const s = String(body.series || '').toUpperCase();
+      if (!latest.series[s]) return send(res, 400, { error: 'Onbekende serie' });
+      saveSosChoice(s, body.uid ? { uid: String(body.uid), label: String(body.label || body.uid) } : null);
+      return send(res, 200, { ok: true, chosen: sosChosen(s) });
     }
     if (req.method === 'GET' && p === '/api/actions') return send(res, 200, [...actions].reverse().slice(0, 50));
     const csv = p.match(/^\/api\/actions\/([^/]+)\/csv$/);
@@ -590,6 +711,17 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && shot) {
       const dev = byId.get(decodeURIComponent(shot[1]));
       if (!dev) return send(res, 404, { error: 'Onbekend scherm' });
+      if (sosState.enabled && dev.sos) {
+        try {
+          const img = await sos.screenshot(cfg, dev.sos.uid);
+          return send(res, 200, img.body, img.contentType);
+        } catch (e) {
+          // signageOS lukt niet: terugvallen op de screenshot van Control (FTP-map)
+          const old = driver.screenshot(dev);
+          if (old) return send(res, 200, old.body, old.contentType);
+          return send(res, 502, { error: `signageOS: ${e.message}`, code: e.code });
+        }
+      }
       const img = driver.screenshot(dev);
       if (!img) return send(res, 404, { error: 'Geen screenshot beschikbaar (scherm slaapt, of geen bestand in de FTP-map)' });
       return send(res, 200, img.body, img.contentType);

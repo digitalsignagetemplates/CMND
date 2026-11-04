@@ -35,6 +35,8 @@ function renderAlerts() {
     if (!f.listening) why.push(`er luistert niets op ${esc(f.ip)}:${f.port}`);
     out.push(`<p class="note warn"><strong>Screenshots:</strong> Control laat schermen uploaden naar FTP ${esc(f.ip)}:${f.port}, maar ${why.join(' en ')}. Dit is waarschijnlijk waarom screenshots niet werken.</p>`);
   }
+  const so = info.signageos;
+  if (so && so.enabled && so.error) out.push(`<p class="note bad"><strong>signageOS niet bereikbaar.</strong> ${esc(so.error)}</p>`);
   $('#alerts').innerHTML = out.join('');
 }
 
@@ -88,7 +90,7 @@ let fwSeriesSel = null;
 const fwSel = new Set();
 let fwChecking = false;
 
-const CHECK_ORDER = [['online', 'Bereikbaar'], ['power', 'Aan'], ['identity', 'Apparaat'], ['version', 'Versie'], ['mode4', 'Mode 4'], ['platform', 'Platform'], ['file', 'Bestand'], ['ftp', 'FTP'], ['ota', 'Bestand voor model']];
+const CHECK_ORDER = [['online', 'Bereikbaar'], ['power', 'Aan'], ['identity', 'Apparaat'], ['version', 'Versie'], ['mode4', 'Mode 4'], ['platform', 'Platform'], ['file', 'Bestand'], ['ftp', 'FTP'], ['ota', 'Bestand voor model'], ['sos', 'signageOS']];
 const seriesOf = (m) => ((String(m || '').match(/BDL(\d{4}[A-Z])/i) || [])[1] || '').toUpperCase();
 const normV = (v) => String(v || '').trim().replace(/^v/i, '').replace(/^FB/i, '').toUpperCase();
 
@@ -158,6 +160,13 @@ function renderFwPanel() {
   }
   if (dl && dl.state === 'bezig') info.push(`<progress max="${dl.total || 1}" value="${dl.received}"></progress><span class="muted small">Ophalen… ${mb(dl.received)}${dl.total ? ` van ${mb(dl.total)}` : ''}</span>`);
   else if (dl && dl.state === 'mislukt') info.push(`<span class="bad-text">Ophalen mislukt: ${esc(dl.error)}</span>`);
+  if (v.sos) {
+    const ch = v.sos.chosen;
+    info.push(`<div class="fw-sos"><span><strong>signageOS:</strong> ${v.sos.linked} van ${devs.length} scherm(en) gekoppeld${ch ? ` · firmware <strong>${esc(ch.label)}</strong>` : ' · nog geen firmware gekozen'}</span>
+      <button class="ghost tiny" data-sosfind="${esc(s)}">${ch ? 'Andere firmware kiezen' : 'Firmware zoeken in signageOS'}</button>
+      <span id="sosPick"></span>
+      <span class="small muted">Gekoppelde schermen met gekozen firmware worden via signageOS bijgewerkt (geen FTP of update.zip nodig); de rest via FTP.</span></div>`);
+  }
   const canFetch = l && v.upgradable && !(dl && dl.state === 'bezig');
   const fetchLabel = v.ready && normV(v.ready.version) === normV(l && l.version) ? 'Opnieuw ophalen' : 'Firmware ophalen';
 
@@ -198,7 +207,7 @@ function renderFwPanel() {
     const disabled = !!(run && !run.t.doneAt);
     return `<tr class="${fwSel.has(d.id) ? 'sel' : ''}">
       <td><input type="checkbox" data-fwsel="${esc(d.id)}" ${fwSel.has(d.id) ? 'checked' : ''} ${disabled ? 'disabled' : ''}></td>
-      <td><div class="dev-name">${esc(d.name === d.ip ? shortModel(d.model) : d.name)}</div><div class="dev-sub">${esc(d.ip)}</div></td>
+      <td><div class="dev-name">${esc(d.name === d.ip ? shortModel(d.model) : d.name)}</div><div class="dev-sub">${esc(d.ip)}${d.fwRoute === 'signageos' ? ' · <span class="route-sos">via signageOS</span>' : ''}</div></td>
       <td>${esc(d.fwVersion || d.firmware || '–')} <span class="muted">→</span> ${esc((l && l.version) || '?')}</td>
       <td><span class="ph ${st.cls}">${esc(st.text)}</span></td>
       <td class="wrap"><div class="checks">${checks}</div>${why}${phase}</td>
@@ -206,8 +215,9 @@ function renderFwPanel() {
   }).join('');
 
   const selDevs = devs.filter((d) => fwSel.has(d.id));
-  const readySel = selDevs.filter((d) => d.preflight && d.preflight.ready);
-  const startable = v.upgradable && v.ready && !v.ready.mismatch && readySel.length && !running;
+  const ftpReady = !!(v.upgradable && v.ready && !v.ready.mismatch);
+  const readySel = selDevs.filter((d) => d.preflight && d.preflight.ready && (d.fwRoute === 'signageos' || ftpReady));
+  const startable = readySel.length && !running;
   $('#fwPanel').innerHTML = `
     <div class="fw-info">${info.join('')}${canFetch ? `<div><button class="ghost" data-fetch="${esc(s)}">${fetchLabel}</button></div>` : ''}</div>
     ${progress}
@@ -240,10 +250,12 @@ function openFwDialog() {
   const v = fwData.series[fwSeriesSel];
   const devs = devices.filter((d) => fwSel.has(d.id) && d.preflight && d.preflight.ready);
   if (!devs.length) return;
+  const target = (v.latest && v.latest.version) || (v.ready && v.ready.version) || '?';
+  const viaSos = devs.filter((d) => d.fwRoute === 'signageos').length;
   const from = {};
   for (const d of devs) { const c = d.fwVersion || d.firmware || '?'; from[c] = (from[c] || 0) + 1; }
   const updateMin = 8; // installeren + herstart (schatting)
-  const uploadMin = Math.ceil((v.ready.size / 1048576) / 4 / 60); // ~4 MB/s via LAN
+  const uploadMin = v.ready ? Math.ceil((v.ready.size / 1048576) / 4 / 60) : 5; // ~4 MB/s via LAN; signageOS: download door het scherm zelf
   const est = (n) => Math.ceil((devs.length / n) * (uploadMin + updateMin));
   const draw = () => {
     const n = Number($('#fwConc').value);
@@ -251,7 +263,8 @@ function openFwDialog() {
       <table class="kv">
         <tr><th>Serie</th><td>${esc(fwSeriesSel)}</td></tr>
         <tr><th>Schermen</th><td>${devs.length}: ${esc(devs.map((d) => d.ip).join(', '))}</td></tr>
-        <tr><th>Versie</th><td>${Object.entries(from).map(([k, c]) => `${esc(k)} (${c}×)`).join(', ')} → <strong>${esc(v.ready.version)}</strong></td></tr>
+        <tr><th>Versie</th><td>${Object.entries(from).map(([k, c]) => `${esc(k)} (${c}×)`).join(', ')} → <strong>${esc(target)}</strong></td></tr>
+        <tr><th>Route</th><td>${viaSos ? `${viaSos} via signageOS` : ''}${viaSos && viaSos < devs.length ? ', ' : ''}${devs.length - viaSos ? `${devs.length - viaSos} via FTP + SICP` : ''}</td></tr>
         <tr><th>Duur (schatting)</th><td>ongeveer ${est(n)} minuten (${uploadMin} min upload + ~${updateMin} min installeren per scherm, ${n} tegelijk)</td></tr>
       </table>
       <p class="note warn">Schermen herstarten tijdens de update en tonen dan geen content. Haal de stroom er niet af. Doe dit bij voorkeur buiten openingstijd.</p>`;
@@ -301,6 +314,28 @@ function initFirmwareUi() {
       t.disabled = true;
       try { await post('/api/firmware/download', { series: t.dataset.fetch }); } catch (err) { alert(err.message); }
       loadFirmware();
+    }
+    if (t.dataset.sosfind) {
+      const series = t.dataset.sosfind;
+      t.disabled = true;
+      $('#sosPick').innerHTML = '<span class="muted small">Zoeken…</span>';
+      try {
+        const r = await api(`/api/signageos/firmware?series=${encodeURIComponent(series)}`);
+        if (!r.candidates.length) $('#sosPick').innerHTML = `<span class="warn-text small">Geen firmware ${esc(r.version || '')} gevonden in de signageOS-catalogus${r.error ? `: ${esc(r.error)}` : ''}.</span>`;
+        else {
+          $('#sosPick').innerHTML = `<select id="sosSel"><option value="">— kies firmware —</option>${r.candidates.map((c) =>
+            `<option value="${esc(c.uid)}" ${r.chosen && r.chosen.uid === c.uid ? 'selected' : ''}>${esc(c.label)}${c.matchesModel ? ' ✓ past bij model' : ''}</option>`).join('')}</select>`;
+          $('#sosSel').onchange = async (ev) => {
+            const o = ev.target.selectedOptions[0];
+            try { await post('/api/signageos/firmware-select', { series, uid: o.value, label: o.textContent.replace(' ✓ past bij model', '') }); } catch (err) { alert(err.message); }
+            await loadFirmware(); loadDevices();
+          };
+        }
+      } catch (err) {
+        const e2 = errInfo(err.body && err.body.code);
+        $('#sosPick').innerHTML = `<span class="bad-text small">${esc(e2 ? `${e2.title}: ${e2.fix}` : err.message)}</span>`;
+      }
+      t.disabled = false;
     }
     if (t.id === 'fwCheck') fwPreflight([...fwSel]);
     if (t.id === 'fwSelReady') {
@@ -612,12 +647,12 @@ async function loadActions() {
 async function showShot(id) {
   const d = devices.find((x) => x.id === id);
   $('#shotTitle').textContent = `${d.name} · ${shortModel(d.model)} · ${d.ip}`;
-  $('#shotBody').innerHTML = '<p class="muted">Laden…</p>';
+  $('#shotBody').innerHTML = `<p class="muted">${d.sos ? 'Live screenshot via signageOS maken (tot een minuut)…' : 'Laden…'}</p>`;
   $('#shot').showModal();
   const r = await fetch(`/api/devices/${encodeURIComponent(id)}/screenshot?t=${Date.now()}`);
   if (r.ok) {
     const url = URL.createObjectURL(await r.blob());
-    $('#shotBody').innerHTML = `<img alt="Screenshot van ${esc(d.name)}" src="${url}">`;
+    $('#shotBody').innerHTML = `<img alt="Screenshot van ${esc(d.name)}" src="${url}">${d.sos ? '<p class="muted small">Live via signageOS.</p>' : ''}`;
   } else {
     const b = await r.json().catch(() => ({}));
     $('#shotBody').innerHTML = `<p class="note warn">${esc(b.error || 'Geen screenshot beschikbaar')}</p>`;
