@@ -5,7 +5,7 @@ const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const DAYS = ['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'];
 const POWER_LABEL = { aan: 'Aan', backlight_uit: 'Backlight uit', slaapt: 'Slaapt', uit: 'Uit', onbekend: 'Onbekend' };
 const STATUS_LABEL = { wachtrij: 'wachtrij', verstuurd: 'bezig', bevestigd: 'bevestigd', mislukt: 'mislukt', geen_reactie: 'geen reactie', niet_getest: 'niet verstuurd (niet getest)', overgeslagen: 'overgeslagen' };
-const TYPE_LABEL = { power: 'Aan/uit', powerSave: 'Power save', source: 'Bron wisselen', bootSource: 'Opstartbron', schedule: 'Powerschema', refresh: 'Status uitlezen', screenshot: 'Screenshot maken', firmware: 'Firmware-upgrade' };
+const TYPE_LABEL = { power: 'Aan/uit', powerSave: 'Power save', source: 'Bron wisselen', bootSource: 'Opstartbron', schedule: 'Powerschema', refresh: 'Status uitlezen', screenshot: 'Screenshot maken', firmware: 'Firmware-upgrade', restart: 'Herstarten' };
 
 let info;
 let devices = [];
@@ -185,7 +185,14 @@ function renderFwPanel() {
     }).join('') : '<span class="muted small">nog niet gecontroleerd</span>';
     // Bij een actueel scherm doen de controles er niet toe; geen foutmelding tonen.
     const firstBad = st.text !== 'Actueel' && pf && pf.checks.find((c) => !c.ok);
-    const why = firstBad ? `<div class="small bad-text">${esc((errInfo(firstBad.code) || {}).title || firstBad.label)}: ${esc(firstBad.text)}</div>` : '';
+    let why = firstBad ? `<div class="small bad-text">${esc((errInfo(firstBad.code) || {}).title || firstBad.label)}: ${esc(firstBad.text)}</div>` : '';
+    // FTP-server reageert niet: volgens PPDS is na het aanzetten van FTP een herstart nodig.
+    const ftpDown = pf && pf.checks.find((c) => c.key === 'ftp' && !c.ok && c.code === 'FTP_UNREACHABLE');
+    const restarting = actions.some((a) => a.type === 'restart' && !a.finishedAt && a.targets.some((x) => x.deviceId === d.id));
+    if (ftpDown && st.text !== 'Actueel') {
+      why += `<div class="small fw-hint">FTP-server op dit scherm staat uit of is nog niet actief. Zet hem aan op het scherm (Settings → Signage Display → Server Settings → FTP) en herstart het scherm.
+        <button class="ghost tiny" data-restart="${esc(d.id)}" ${restarting ? 'disabled' : ''}>${restarting ? 'Herstarten…' : 'Herstart scherm'}</button></div>`;
+    }
     const run = fwTargetFor(d.id);
     const phase = run && (run.t.phase || run.t.status !== 'bevestigd') ? `${phaseBar(run.t)}${!run.t.doneAt ? `<div class="small muted">${esc(run.t.detail || '')}</div>` : ''}` : '';
     const disabled = !!(run && !run.t.doneAt);
@@ -209,6 +216,7 @@ function renderFwPanel() {
       <button class="ghost" id="fwCheck" ${fwChecking || !selDevs.length ? 'disabled' : ''}>${fwChecking ? 'Controleren…' : `Controleer geselecteerde (${selDevs.length})`}</button>
       <button class="ghost" id="fwSelReady">Selecteer alle klare</button>
       <button class="ghost" id="fwMode4" ${!selDevs.length ? 'disabled' : ''} title="Zet power save op Mode 4 (PPDS-voorschrift voor firmware-updates)">Zet Mode 4 op geselecteerde</button>
+      <button class="ghost" id="fwRestart" ${!selDevs.length ? 'disabled' : ''} title="Herstart via SICP, bv. nadat FTP op het scherm is aangezet">Herstart geselecteerde</button>
       <span class="spacer"></span>
       <button class="primary" id="fwStart" ${startable ? '' : 'disabled'} title="${startable ? '' : 'Selecteer schermen die "Klaar voor update" zijn, met klaargezette firmware'}">Start update (${readySel.length})</button>
     </div>
@@ -309,6 +317,23 @@ function initFirmwareUi() {
       } catch (err) { alert(err.message); }
     }
     if (t.id === 'fwStart') openFwDialog();
+    const restartIds = t.dataset.restart ? [t.dataset.restart] : t.id === 'fwRestart' ? [...fwSel] : null;
+    if (restartIds && restartIds.length) {
+      const names = devices.filter((d) => restartIds.includes(d.id)).map((d) => d.ip).join(', ');
+      if (!confirm(`${restartIds.length} scherm(en) herstarten (${names})?\n\nHet scherm toont ongeveer 1 minuut geen content. Na de herstart zijn nieuwe FTP-instellingen actief.`)) return;
+      t.disabled = true;
+      try {
+        const r = await post('/api/actions', { type: 'restart', params: {}, deviceIds: restartIds });
+        await loadActions();
+        renderFwPanel();
+        // Na afloop automatisch opnieuw controleren.
+        const waitDone = async () => {
+          const a = (await api('/api/actions')).find((x) => x.id === r.action.id);
+          if (a && a.finishedAt) { await loadActions(); fwPreflight(restartIds); } else setTimeout(waitDone, 5000);
+        };
+        setTimeout(waitDone, 5000);
+      } catch (err) { alert(err.message); t.disabled = false; }
+    }
   });
   $('#fwConfirmTxt').addEventListener('input', (e) => { $('#fwDlgStart').disabled = e.target.value.trim() !== 'UPGRADE'; });
   $('#fwDlgStart').onclick = startFwUpdate;
@@ -579,7 +604,7 @@ async function loadActions() {
   renderKpis();
   if (actions.some((a) => !a.finishedAt)) loadDevices();
   // Voortgang van een lopende firmware-update live bijwerken in het overzicht.
-  if (fwSeriesSel && actions.some((a) => a.type === 'firmware' && !a.finishedAt)) renderFwPanel();
+  if (fwSeriesSel && actions.some((a) => ['firmware', 'restart'].includes(a.type) && !a.finishedAt)) renderFwPanel();
 }
 
 // ---------- screenshot ----------

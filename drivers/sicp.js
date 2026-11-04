@@ -311,6 +311,22 @@ async function execute(dev, type, params, profile, cfg) {
       const r = ackResult(await send(dev, cfg, [hex(c.code)]));
       return r.ok ? { ok: true, detail: 'Screenshot gemaakt; het scherm mailt hem naar het ingestelde e-mailadres' } : r;
     }
+    case 'restart': {
+      // SICP 2.13 §4.4: 0x57 0x00 = herstart (Android, en vanaf 2.13 ook de scaler). Daarna wachten
+      // tot het scherm weer antwoordt, zodat bv. nieuwe FTP-instellingen actief zijn.
+      const c = command(profile, cfg, 'restart');
+      const res = ackResult(await send(dev, cfg, [hex(c.code), 0x00]));
+      if (!res.ok) return res;
+      const t0 = Date.now();
+      let wasDown = false;
+      while (Date.now() - t0 < 180000) {
+        await sleep(10000);
+        const up = await read(dev, profile, cfg, 'powerGet');
+        if (!up) wasDown = true;
+        else if (wasDown || Date.now() - t0 > 60000) return { ok: true, detail: `herstart; na ${Math.round((Date.now() - t0) / 1000)} s weer bereikbaar` };
+      }
+      return { ok: false, noReply: true, code: 'NO_REPLY', error: 'Herstart verstuurd, maar het scherm is na 3 minuten nog niet weer bereikbaar' };
+    }
     case 'firmware': {
       // SICP 2.13 §11.13: update.zip in de hoofdmap van het scherm, daarna 0x20 0x00.
       // params.file / params.version worden door de server per model ingevuld.

@@ -26,7 +26,7 @@ const CATALOG = {
   FW_BUSY: { title: 'Er loopt al een upgrade', cause: 'Op dit scherm loopt al een firmware-upgrade.', fix: 'Wacht tot die klaar is.' },
 
   // Firmware: upload
-  FTP_UNREACHABLE: { title: 'FTP-server van het scherm niet bereikbaar', cause: 'Er kon geen verbinding worden gemaakt met de FTP-server op het scherm (poort 2121).', fix: 'Zet op het scherm de FTP-server aan (Instellingen → Signage Display → Server settings → FTP → Enable) en controleer de poort.' },
+  FTP_UNREACHABLE: { title: 'FTP-server van het scherm niet bereikbaar', cause: 'Er kon geen verbinding worden gemaakt met de FTP-server op het scherm (poort 2121).', fix: 'Zet op het scherm de FTP-server aan (Settings → Signage Display → Server Settings → FTP → Enable) en herstart daarna het scherm; volgens PPDS worden de FTP-instellingen pas na een herstart actief. In het firmware-overzicht staat een knop "Herstart scherm".' },
   FTP_LOGIN: { title: 'FTP-login geweigerd', cause: 'Gebruikersnaam of wachtwoord van de FTP-server op het scherm klopt niet.', fix: 'Zet op het scherm én in CMND hetzelfde FTP-wachtwoord als in config.local.json.' },
   FTP_STORAGE_FULL: { title: 'Geheugen van het scherm vol', cause: 'De upload stopte omdat er te weinig vrije ruimte op het scherm is.', fix: 'Maak ruimte vrij op het scherm (bijv. oude logbestanden in /philips/Log) of werk het scherm bij via USB volgens de PPDS-instructie.' },
   FTP_TRANSFER: { title: 'Upload afgebroken', cause: 'De verbinding viel weg tijdens het uploaden van de firmware.', fix: 'Controleer de netwerkverbinding (bij voorkeur bekabeld) en probeer opnieuw.' },

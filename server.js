@@ -297,7 +297,7 @@ try {
   }
 } catch { /* nog geen historie */ }
 
-const ACTION_TYPES = ['power', 'powerSave', 'source', 'bootSource', 'schedule', 'refresh', 'screenshot', 'firmware'];
+const ACTION_TYPES = ['power', 'powerSave', 'source', 'bootSource', 'schedule', 'refresh', 'screenshot', 'firmware', 'restart'];
 
 function validate(type, params) {
   if (!ACTION_TYPES.includes(type)) return `Onbekende actie: ${type}`;
@@ -346,6 +346,7 @@ async function runTarget(action, t) {
     // Aan/uit wacht op het opstarten; schema en uitlezen doen meerdere commando's. Daarom ruimere time-out.
     // Firmware: upload + herstart + teruglezen, dat duurt al gauw een half uur.
     let ms = ['power', 'schedule', 'refresh', 'source'].includes(action.type) ? cfg.timeoutMs + 40000 : cfg.timeoutMs * 2;
+    if (action.type === 'restart') ms = 240000; // herstart + wachten tot het scherm terug is
     let params = action.params;
     if (action.type === 'firmware') {
       ms = ((cfg.firmwareWaitMinutes || 25) + 30) * 60000;
