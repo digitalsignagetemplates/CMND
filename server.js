@@ -131,7 +131,7 @@ async function syncSignageOS(force = false) {
     let linked = 0;
     for (const d of devices) {
       const s = bySerial.get(String(d.serial || '').replace(/\/\d+$/, '').trim().toUpperCase());
-      d.sos = s ? { uid: s.uid, name: s.name, model: s.model, firmwareVersion: s.firmwareVersion, applicationType: s.applicationType } : null;
+      d.sos = s ? { uid: s.uid, name: s.name, model: s.model, firmwareType: s.firmwareType, firmwareVersion: s.firmwareVersion, applicationType: s.applicationType } : null;
       if (s) linked++;
     }
     sosState.linked = linked;
@@ -164,11 +164,13 @@ function saveSosChoice(series, c) {
 async function sosCandidates(series) {
   const l = latest.series[series];
   if (!l || !l.version) return { candidates: [], chosen: null, error: 'Geen nieuwste versie bekend uit de PPDS-kennisbank' };
-  const list = await sos.findFirmware(cfg, { version: l.version, model: `BDL${series}`, brand: 'philips' });
+  const types = [...new Set(devices.filter((d) => seriesOf(d.model) === series && d.sos).map((d) => d.sos.firmwareType).filter(Boolean))];
+  if (!types.length) return { candidates: [], chosen: sosChosen(series), version: l.version, error: 'Geen schermen van deze serie gekoppeld in signageOS' };
+  const list = await sos.findFirmware(cfg, { version: l.version, firmwareTypes: types });
   const candidates = list.slice(0, 20).map((f) => ({
     uid: f.uid,
-    label: [f.brand, f.firmwareType, f.manufacturerVersion || f.semverVersion].filter(Boolean).join(' · '),
-    matchesModel: f.matchesModel,
+    label: [f.firmwareType, f.manufacturerVersion || f.semverVersion].filter(Boolean).join(' · '),
+    matchesModel: f.exact,
   }));
   const fits = candidates.filter((c) => c.matchesModel);
   if (!sosChosen(series) && fits.length === 1) saveSosChoice(series, fits[0]);
@@ -687,7 +689,14 @@ const server = http.createServer(async (req, res) => {
       if (p === '/api/signageos/refresh') { await syncSignageOS(true); return send(res, 200, { ok: !sosState.error, error: sosState.error }); }
       const s = String(body.series || '').toUpperCase();
       if (!latest.series[s]) return send(res, 400, { error: 'Onbekende serie' });
-      saveSosChoice(s, body.uid ? { uid: String(body.uid), label: String(body.label || body.uid) } : null);
+      let pick = null;
+      if (body.uid) {
+        // Alleen exact de nieuwste PPDS-versie: een oudere versie uit de catalogus zou een downgrade zijn.
+        const { candidates } = await sosCandidates(s).catch((e) => ({ candidates: [], error: e.message }));
+        pick = candidates.find((c) => c.uid === String(body.uid) && c.matchesModel);
+        if (!pick) return send(res, 400, { error: `Alleen firmware ${latest.series[s].version} (nieuwste PPDS-versie) kan worden gekozen` });
+      }
+      saveSosChoice(s, pick);
       return send(res, 200, { ok: true, chosen: sosChosen(s) });
     }
     if (req.method === 'GET' && p === '/api/actions') return send(res, 200, [...actions].reverse().slice(0, 50));

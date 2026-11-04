@@ -321,13 +321,13 @@ function initFirmwareUi() {
       $('#sosPick').innerHTML = '<span class="muted small">Zoeken…</span>';
       try {
         const r = await api(`/api/signageos/firmware?series=${encodeURIComponent(series)}`);
-        if (!r.candidates.length) $('#sosPick').innerHTML = `<span class="warn-text small">Geen firmware ${esc(r.version || '')} gevonden in de signageOS-catalogus${r.error ? `: ${esc(r.error)}` : ''}.</span>`;
+        if (!r.candidates.length) $('#sosPick').innerHTML = `<span class="warn-text small">Geen firmware voor deze serie in de signageOS-catalogus (nieuwste PPDS-versie ${esc(r.version || '?')})${r.error ? `: ${esc(r.error)}` : ''}.</span>`;
         else {
           $('#sosPick').innerHTML = `<select id="sosSel"><option value="">— kies firmware —</option>${r.candidates.map((c) =>
-            `<option value="${esc(c.uid)}" ${r.chosen && r.chosen.uid === c.uid ? 'selected' : ''}>${esc(c.label)}${c.matchesModel ? ' ✓ past bij model' : ''}</option>`).join('')}</select>`;
+            `<option value="${esc(c.uid)}" ${r.chosen && r.chosen.uid === c.uid ? 'selected' : ''} ${c.matchesModel ? '' : 'disabled'}>${esc(c.label)}${c.matchesModel ? ' ✓ nieuwste PPDS-versie' : ' (ouder, niet te kiezen)'}</option>`).join('')}</select>`;
           $('#sosSel').onchange = async (ev) => {
             const o = ev.target.selectedOptions[0];
-            try { await post('/api/signageos/firmware-select', { series, uid: o.value, label: o.textContent.replace(' ✓ past bij model', '') }); } catch (err) { alert(err.message); }
+            try { await post('/api/signageos/firmware-select', { series, uid: o.value, label: o.textContent.replace(' ✓ nieuwste PPDS-versie', '') }); } catch (err) { alert(err.message); }
             await loadFirmware(); loadDevices();
           };
         }

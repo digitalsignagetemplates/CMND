@@ -57,18 +57,24 @@ async function devicesBySerial(cfg) {
   return map;
 }
 
-// Firmwarecatalogus van signageOS; zoeken op de PPDS-versie (bv. FB01.20) en het model/platform.
-async function findFirmware(cfg, { version, model, brand }) {
-  const q = new URLSearchParams({ limit: '100', search: version || '' });
-  const list = await getAll(cfg, `/v2/firmware?${q}`);
+// Firmwaretype zonder schermmaat: catalogus "philips_55bdl4550d" en apparaat "philips_bdl4550d" zijn dezelfde familie.
+const typeFamily = (t) => String(t || '').toLowerCase().replace(/^philips_[0-9]+/, 'philips_');
+
+// Firmwarecatalogus van signageOS (eens per 10 minuten opgehaald; zoeken op type werkt niet in de API).
+let catalogCache = { at: 0, list: null };
+async function catalog(cfg) {
+  if (!catalogCache.list || Date.now() - catalogCache.at > 10 * 60000) catalogCache = { at: Date.now(), list: await getAll(cfg, '/v2/firmware?limit=100') };
+  return catalogCache.list;
+}
+
+// Firmware voor de firmwaretypes van de gekoppelde schermen. Exact de PPDS-versie (bv. FB01.20) komt bovenaan.
+async function findFirmware(cfg, { version, firmwareTypes = [] }) {
+  const fams = new Set(firmwareTypes.map(typeFamily));
   const v = norm(version);
-  const series = (String(model || '').match(/BDL(\d{4}[A-Z])/i) || [])[1];
-  return list
-    .filter((f) => f.published !== false)
-    .filter((f) => !brand || !f.brand || /philips|ppds|tpv/i.test(f.brand))
-    .filter((f) => !v || norm(f.manufacturerVersion).includes(v) || norm(f.semverVersion).includes(v))
-    .map((f) => ({ ...f, matchesModel: !!(series && JSON.stringify(f).toUpperCase().includes(series.toUpperCase())) }))
-    .sort((a, b) => Number(b.matchesModel) - Number(a.matchesModel));
+  return (await catalog(cfg))
+    .filter((f) => f.published !== false && fams.has(typeFamily(f.firmwareType)))
+    .map((f) => ({ ...f, exact: !!v && norm(f.manufacturerVersion) === v }))
+    .sort((x, y) => Number(y.exact) - Number(x.exact) || String(y.manufacturerVersion).localeCompare(String(x.manufacturerVersion)));
 }
 
 // Firmware-upgrade via signageOS: opdracht geven en wachten tot het apparaat de nieuwe versie meldt.
@@ -101,7 +107,10 @@ async function screenshot(cfg, uid, { waitSeconds = 60 } = {}) {
     if (shot && shot.uri) {
       const img = await fetch(shot.uri);
       if (!img.ok) throw sosError('SOS_ERROR', `Screenshot niet op te halen (HTTP ${img.status})`);
-      return { contentType: img.headers.get('content-type') || 'image/png', body: Buffer.from(await img.arrayBuffer()), takenAt: shot.takenAt };
+      const body = Buffer.from(await img.arrayBuffer());
+      // signageOS levert het bestand als application/octet-stream; type afleiden uit de eerste bytes.
+      const contentType = body[0] === 0x89 && body[1] === 0x50 ? 'image/png' : body[0] === 0xff && body[1] === 0xd8 ? 'image/jpeg' : img.headers.get('content-type') || 'image/png';
+      return { contentType, body, takenAt: shot.takenAt };
     }
   }
   throw sosError('SOS_TIMEOUT', 'signageOS heeft binnen een minuut geen screenshot aangeleverd (staat het scherm online?)');
